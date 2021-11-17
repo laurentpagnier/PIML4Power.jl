@@ -1,4 +1,4 @@
-module Power_PIML
+module PIML4Power
 
 using SparseArrays
 using Flux
