@@ -1,0 +1,4 @@
+name = "Power_PIML"
+uuid = "d21a5426-87c7-4d62-b7e9-54dded8ab86d"
+authors = ["laurentpagnier <laurent.vincent.pagnier@gmail.com>"]
+version = "0.1.0"
