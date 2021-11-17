@@ -1,1 +1,1 @@
-# Phys-inf-GNN-for-PS
+# PIML4Power.jl
