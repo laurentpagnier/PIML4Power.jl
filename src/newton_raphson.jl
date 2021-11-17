@@ -131,6 +131,37 @@ function Newton_Raphson_scheme(
 end
 
 
+function V2S_map(
+    b::Vector{Float64},
+    g::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    v::Vector{Float64},
+    th::Vector{Float64},
+    mat::Matrices,
+    id::Indices
+)
+    # compute the missmatches for NR scheme
+    dtheta = mat.Bmt * vec(th)
+    costh = cos.(dtheta) 
+    sinth = sin.(dtheta) 
+
+    gs = g .* sinth
+    gc = g .* costh
+    bs = b .* sinth
+    bc = b .* costh
+
+    p = v .* ( (mat.Bin * ((-gc - bs) .* mat.Boutt) +
+        mat.Bout * ((-gc + bs) .* mat.Bint)) * v  +
+        (mat.Bp * g + gsh) .* v)
+    
+    q = v .* ( (mat.Bin * ((-gs + bc) .* mat.Boutt) +
+        mat.Bout * ((gs + bc) .* mat.Bint)) * v -
+        (mat.Bp * b + bsh) .* v)
+    return p, q
+end
+
+
 function loss(
     beta::Vector{Float64},
     gamma::Vector{Float64},
@@ -152,7 +183,7 @@ function loss(
     g = exp.(gamma)
     th, v = Newton_Raphson_scheme(b, g, bsh, gsh, p, q, vg,
         theta_slack, mat, id, Niter = Niter)
-    p_est, q_est = V2S(b, g, bsh, gsh, v, th, mat, id)
+    p_est, q_est = V2S_map(b, g, bsh, gsh, v, th, mat, id)
 
     return sum(abs.(th - thref)) + sum(abs.(v - vref)) +
         sum(abs.(p_est - pref)) + sum(abs.(q_est - qref)) 

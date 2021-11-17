@@ -35,7 +35,6 @@ struct Matrices
     Ipq::SparseMatrixCSC{Float64, Int64}
 end
 
-
 struct Indices
     slack::Int64
     pv::Vector{Int64}

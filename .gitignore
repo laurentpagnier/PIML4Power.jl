@@ -1,0 +1,9 @@
+notebooks/*
+src/.ipynb_checkpoints*
+docs/.ipynb_checkpoints*
+numerics*
+*.DS_Store
+*.synctex.gz
+*.log
+*.aux
+*.bib
