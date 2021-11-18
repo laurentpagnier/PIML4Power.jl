@@ -1,4 +1,4 @@
-export newton_raphson_scheme, v2s_map, batch_training
+export newton_raphson_scheme, v2s_map, batch_train!
 
 #using Flux
 
