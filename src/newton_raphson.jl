@@ -1,3 +1,6 @@
+export newton_raphson_scheme, v2s_map, batch_training
+
+#using Flux
 
 function dPQ(
     b::Vector{Float64},
@@ -96,7 +99,7 @@ function jacob(
     
 end
 
-function Newton_Raphson_scheme(
+function newton_raphson_scheme(
     b::Vector{Float64},
     g::Vector{Float64},
     bsh::Vector{Float64},
@@ -131,7 +134,7 @@ function Newton_Raphson_scheme(
 end
 
 
-function V2S_map(
+function v2s_map(
     b::Vector{Float64},
     g::Vector{Float64},
     bsh::Vector{Float64},
@@ -162,7 +165,7 @@ function V2S_map(
 end
 
 
-function loss(
+function full_obs_missmatch(
     beta::Vector{Float64},
     gamma::Vector{Float64},
     bsh::Vector{Float64},
@@ -170,27 +173,27 @@ function loss(
     p::Vector{Float64},
     q::Vector{Float64},
     vg::Vector{Float64},
+    theta_slack::Float64,
     thref::Vector{Float64},
     vref::Vector{Float64},
     pref::Vector{Float64},
     qref::Vector{Float64},
-    theta_slack::Float64,
     mat::Matrices,
     id::Indices;
     Niter = 3::Int64
 )
     b = -exp.(beta)
     g = exp.(gamma)
-    th, v = Newton_Raphson_scheme(b, g, bsh, gsh, p, q, vg,
+    th, v = newton_raphson_scheme(b, g, bsh, gsh, p, q, vg,
         theta_slack, mat, id, Niter = Niter)
-    p_est, q_est = V2S_map(b, g, bsh, gsh, v, th, mat, id)
+    p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
 
     return sum(abs.(th - thref)) + sum(abs.(v - vref)) +
         sum(abs.(p_est - pref)) + sum(abs.(q_est - qref)) 
 end
 
 
-function batch_training(
+function batch_train!(
     beta::Vector{Float64},
     gamma::Vector{Float64},
     bsh::Vector{Float64},
@@ -198,25 +201,40 @@ function batch_training(
     p::Matrix{Float64},
     q::Matrix{Float64},
     vg::Matrix{Float64},
+    theta_slack::Vector{Float64},
     thref::Matrix{Float64},
     vref::Matrix{Float64},
     pref::Matrix{Float64},
     qref::Matrix{Float64},
-    theta_slack::Vector{Float64},
     mat::Matrices,
-    id::Indices;
-    Niter = 3::Int64
+    id::Indices,
+    opt;
+    Niter = 3::Int64,
+    Nepoch = 10::Int64,
 )
-    Nbatch = size(vg,2)
-    grad = (zeros(length(beta)),zeros(length(beta)),zeros(length(gsh)),zeros(length(bsh)))
-    for batch in 1:Nbatch
-        g = gradient((beta, gamma, bsh, gsh) -> loss(beta, gamma, bsh, gsh, p[:,batch],
-        q[:,batch], vg[:,batch], thref[:,batch], vref[:,batch], pref[:,batch], qref[:,batch], th_slack[batch], mat, id, Niter = Niter), beta, gamma, bsh, gsh)
+    Nbatch = size(vg, 2)
+    for e = 1:Nepoch
+        grad = (zeros(length(beta)), zeros(length(beta)),
+            zeros(length(gsh)), zeros(length(bsh)))
+        for batch in 1:Nbatch
+            g = gradient((beta, gamma, bsh, gsh) -> full_obs_missmatch(beta,
+                gamma, bsh, gsh, p[:,batch], q[:,batch], vg[:,batch],
+                th_slack[batch], thref[:,batch], vref[:,batch], pref[:,batch],
+                qref[:,batch], mat, id, Niter = Niter), beta, gamma,
+                bsh, gsh)
 
-        grad[1] .+= g[1] / Nbatch
-        grad[2] .+= g[2] / Nbatch
-        grad[3] .+= g[3] / Nbatch
-        grad[4] .+= g[4] / Nbatch
+            grad[1] .+= g[1] / Nbatch
+            grad[2] .+= g[2] / Nbatch
+            grad[3] .+= g[3] / Nbatch
+            grad[4] .+= g[4] / Nbatch
+        end
+        Flux.update!(opt, beta, grad[1])
+        Flux.update!(opt, gamma, grad[2])
+        Flux.update!(opt, bsh, grad[3])
+        Flux.update!(opt, gsh, grad[4])
+        if(mod(e, 5) == 0)
+            println([e])
+        end
     end
-    return grad
+    return nothing
 end
