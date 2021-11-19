@@ -201,7 +201,7 @@ function batch_train!(
     p::Matrix{Float64},
     q::Matrix{Float64},
     vg::Matrix{Float64},
-    theta_slack::Vector{Float64},
+    th_slack::Vector{Float64},
     thref::Matrix{Float64},
     vref::Matrix{Float64},
     pref::Matrix{Float64},
@@ -212,15 +212,17 @@ function batch_train!(
     Niter = 3::Int64,
     Nepoch = 10::Int64,
 )
+    println("AIE")
+    println(th_slack)
     Nbatch = size(vg, 2)
     for e = 1:Nepoch
         grad = (zeros(length(beta)), zeros(length(beta)),
             zeros(length(gsh)), zeros(length(bsh)))
-        for batch in 1:Nbatch
+        for i in 1:Nbatch
             g = gradient((beta, gamma, bsh, gsh) -> full_obs_missmatch(beta,
-                gamma, bsh, gsh, p[:,batch], q[:,batch], vg[:,batch],
-                th_slack[batch], thref[:,batch], vref[:,batch], pref[:,batch],
-                qref[:,batch], mat, id, Niter = Niter), beta, gamma,
+                gamma, bsh, gsh, p[:,i], q[:,i], vg[:,i],
+                th_slack[i], thref[:,i], vref[:,i], pref[:,i],
+                qref[:,i], mat, id, Niter = Niter), beta, gamma,
                 bsh, gsh)
 
             grad[1] .+= g[1] / Nbatch

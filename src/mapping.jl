@@ -43,11 +43,8 @@ function train_V2S_map!(
     gamma::Vector{Float64},
     bsh::Vector{Float64},
     gsh::Vector{Float64},
-    p::Matrix{Float64},
-    q::Matrix{Float64},
-    vg::Matrix{Float64},
-    thref::Matrix{Float64},
-    vref::Matrix{Float64},
+    th::Matrix{Float64},
+    v::Matrix{Float64},
     pref::Matrix{Float64},
     qref::Matrix{Float64},
     mat::Matrices,
@@ -59,10 +56,10 @@ function train_V2S_map!(
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
 
     for e in 1:Nepoch
-        g = gradient((beta, gamma, bsh, gsh) do
+        g = gradient(beta, gamma, bsh, gsh) do
             b = -exp.(beta)
-            g = exp.(gamma)_ 
-            V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+            g = exp.(gamma)
+            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
             sum(abs.(p-pref)) + sum(abs.(q-qref))
         end
         Flux.update!(opt, beta, g[1])
@@ -75,3 +72,42 @@ function train_V2S_map!(
     end  
     return nothing
 end
+
+
+function train_hybrid_V2S_map!(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    th::Matrix{Float64},
+    v::Matrix{Float64},
+    pref::Matrix{Float64},
+    qref::Matrix{Float64},
+    mat::Matrices,
+    id::Indices
+    c::Flux.Chain;
+    Niter = 3::Int64,
+    Nepoch = 10::Int64,
+)
+    Nbatch = size(vg,2)    
+    Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
+    p = params(c)
+    for e in 1:Nepoch
+        g = gradient(beta, gamma, bsh, gsh, p) do
+            b = -exp.(beta)
+            g = exp.(gamma)
+            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+            sum(abs.(p-pref)) + sum(abs.(q-qref))
+        end
+        Flux.update!(opt, beta, g[1])
+        Flux.update!(opt, gamma, g[2])
+        Flux.update!(opt, bsh, g[3])
+        Flux.update!(opt, gsh, g[4])
+        Flux.update!(opt, p, g[5])
+        if(mod(e, 5) == 0)
+            println([e])
+        end
+    end  
+    return nothing
+end
+
