@@ -1,6 +1,6 @@
 export newton_raphson_scheme, v2s_map, batch_train!
 
-#using Flux
+using IterativeSolvers
 
 function dPQ(
     b::Vector{Float64},
@@ -124,6 +124,7 @@ function newton_raphson_scheme(
         dpq = dPQ(b, g, bsh, gsh, v, th, mat, id, p, q)
         jac = jacob(b, g, bsh, gsh, v, th, mat, id)
         x = jac \ dpq
+        #x = idrs(jac, dpq,s=1) # blow the memory during the compiling!
         th_new = th - mat.ns2full * x[1:id.Nbus-1]
         v_new = v - mat.pq2full * x[id.Nbus:end]
         v = v_new
@@ -210,21 +211,22 @@ function batch_train!(
     id::Indices,
     opt;
     Niter = 3::Int64,
+    Ninter = 10::Int64,
     Nepoch = 10::Int64,
 )
-    println("AIE")
-    println(th_slack)
     Nbatch = size(vg, 2)
+    println("asdf")
     for e = 1:Nepoch
         grad = (zeros(length(beta)), zeros(length(beta)),
             zeros(length(gsh)), zeros(length(bsh)))
         for i in 1:Nbatch
+            @time begin
             g = gradient((beta, gamma, bsh, gsh) -> full_obs_missmatch(beta,
                 gamma, bsh, gsh, p[:,i], q[:,i], vg[:,i],
                 th_slack[i], thref[:,i], vref[:,i], pref[:,i],
                 qref[:,i], mat, id, Niter = Niter), beta, gamma,
                 bsh, gsh)
-
+            end
             grad[1] .+= g[1] / Nbatch
             grad[2] .+= g[2] / Nbatch
             grad[3] .+= g[3] / Nbatch
@@ -234,8 +236,14 @@ function batch_train!(
         Flux.update!(opt, gamma, grad[2])
         Flux.update!(opt, bsh, grad[3])
         Flux.update!(opt, gsh, grad[4])
-        if(mod(e, 5) == 0)
-            println([e])
+        if(mod(e, Ninter) == 0)
+            error = 0
+            for i in 1:Nbatch
+                error += full_obs_missmatch(beta, gamma, bsh, gsh, p[:,i],
+                q[:,i], vg[:,i], th_slack[i], thref[:,i], vref[:,i], pref[:,i],
+                qref[:,i], mat, id, Niter = Niter)
+            end
+            println([e, error])
         end
     end
     return nothing
