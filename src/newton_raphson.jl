@@ -1,6 +1,6 @@
 export newton_raphson_scheme, v2s_map, batch_train!
 
-using IterativeSolvers
+#using IterativeSolvers
 
 function dPQ(
     b::Vector{Float64},
@@ -110,7 +110,8 @@ function newton_raphson_scheme(
     theta_slack::Float64,
     mat::Matrices,
     id::Indices;
-    Niter = 3::Int64
+    Niter = 3::Int64,
+    const_jac = false::Bool
 )
     v = zeros(id.Nbus)
     th = zeros(id.Nbus)
@@ -120,9 +121,15 @@ function newton_raphson_scheme(
     v_new = zeros(id.Nbus)
     th_new = zeros(id.Nbus)
 
+    if const_jac
+        jac = jacob(b, g, bsh, gsh, v, th, mat, id)
+    end
+
     for i in 1:Niter
         dpq = dPQ(b, g, bsh, gsh, v, th, mat, id, p, q)
-        jac = jacob(b, g, bsh, gsh, v, th, mat, id)
+        if const_jac == false
+            jac = jacob(b, g, bsh, gsh, v, th, mat, id)
+        end
         x = jac \ dpq
         #x = idrs(jac, dpq,s=1) # blow the memory during the compiling!
         th_new = th - mat.ns2full * x[1:id.Nbus-1]
@@ -133,6 +140,7 @@ function newton_raphson_scheme(
     
     return th, v
 end
+
 
 
 function v2s_map(
@@ -181,12 +189,13 @@ function full_obs_missmatch(
     qref::Vector{Float64},
     mat::Matrices,
     id::Indices;
-    Niter = 3::Int64
+    Niter = 3::Int64,
+    const_jac::Bool,
 )
     b = -exp.(beta)
     g = exp.(gamma)
     th, v = newton_raphson_scheme(b, g, bsh, gsh, p, q, vg,
-        theta_slack, mat, id, Niter = Niter)
+        theta_slack, mat, id, Niter = Niter, const_jac = const_jac)
     p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
 
     return sum(abs.(th - thref)) + sum(abs.(v - vref)) +
@@ -213,20 +222,18 @@ function batch_train!(
     Niter = 3::Int64,
     Ninter = 10::Int64,
     Nepoch = 10::Int64,
+    const_jac = false::Bool,
 )
     Nbatch = size(vg, 2)
-    println("asdf")
     for e = 1:Nepoch
         grad = (zeros(length(beta)), zeros(length(beta)),
             zeros(length(gsh)), zeros(length(bsh)))
         for i in 1:Nbatch
-            @time begin
             g = gradient((beta, gamma, bsh, gsh) -> full_obs_missmatch(beta,
                 gamma, bsh, gsh, p[:,i], q[:,i], vg[:,i],
                 th_slack[i], thref[:,i], vref[:,i], pref[:,i],
-                qref[:,i], mat, id, Niter = Niter), beta, gamma,
-                bsh, gsh)
-            end
+                qref[:,i], mat, id, Niter = Niter, const_jac = const_jac),
+                beta, gamma, bsh, gsh)
             grad[1] .+= g[1] / Nbatch
             grad[2] .+= g[2] / Nbatch
             grad[3] .+= g[3] / Nbatch
@@ -241,7 +248,7 @@ function batch_train!(
             for i in 1:Nbatch
                 error += full_obs_missmatch(beta, gamma, bsh, gsh, p[:,i],
                 q[:,i], vg[:,i], th_slack[i], thref[:,i], vref[:,i], pref[:,i],
-                qref[:,i], mat, id, Niter = Niter)
+                qref[:,i], mat, id, Niter = Niter, const_jac = const_jac)
             end
             println([e, error])
         end
