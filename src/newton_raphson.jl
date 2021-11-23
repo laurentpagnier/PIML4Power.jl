@@ -2,6 +2,121 @@ export newton_raphson_scheme, v2s_map, batch_train!
 
 #using IterativeSolvers
 
+
+function batch_train!(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    p::Matrix{Float64},
+    q::Matrix{Float64},
+    vg::Matrix{Float64},
+    th_slack::Vector{Float64},
+    thref::Matrix{Float64},
+    vref::Matrix{Float64},
+    pref::Matrix{Float64},
+    qref::Matrix{Float64},
+    mat::Matrices,
+    id::Indices,
+    opt;
+    Niter = 3::Int64,
+    Ninter = 10::Int64,
+    Nepoch = 10::Int64,
+    const_jac = false::Bool,
+)
+    Nbatch = size(vg, 2)
+    ps = params(beta, gamma, bsh, gsh)
+    for e = 1:Nepoch
+        gs = gradient(ps) do
+            b = -exp.(beta)
+            g = exp.(gamma)
+            th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,1], q[:,1],
+                vg[:,1], th_slack[1], mat, id, Niter = Niter,
+                const_jac = const_jac)
+            p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+            return sum(abs.(th - thref[:,1])) + sum(abs.(v - vref[:,1])) +
+                sum(abs.(p_est - pref[:,1])) + sum(abs.(q_est - qref[:,1]))
+        end
+        for i in 2:Nbatch
+            gs .+= gradient(ps) do
+                b = -exp.(beta)
+                g = exp.(gamma)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,i], q[:,i],
+                    vg[:,i], th_slack[i], mat, id, Niter = Niter,
+                    const_jac = const_jac)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+                return sum(abs.(th - thref[:,i])) + sum(abs.(v - vref[:,i])) +
+                    sum(abs.(p_est - pref[:,i])) + sum(abs.(q_est - qref[:,i]))
+            end
+        end
+        Flux.update!(opt, ps, gs)
+        if(mod(e, Ninter) == 0)
+            error = 0
+            for i in 1:Nbatch
+                #error += full_obs_missmatch(beta, gamma, bsh, gsh, p[:,i],
+                #q[:,i], vg[:,i], th_slack[i], thref[:,i], vref[:,i], pref[:,i],
+                #qref[:,i], mat, id, Niter = Niter, const_jac = const_jac)
+                b = -exp.(beta)
+                g = exp.(gamma)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,i], q[:,i], vg[:,i],
+                    th_slack[i], mat, id, Niter = Niter, const_jac = const_jac)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+
+                error += (sum(abs.(th - thref[:,i])) + sum(abs.(v - vref[:,i])) +
+                    sum(abs.(p_est - pref[:,i])) + sum(abs.(q_est - qref[:,i]))) /
+                    2.0 / prod(size(thref))
+                
+            end
+            println([e, error])
+        end
+    end
+    return nothing
+end
+
+
+function newton_raphson_scheme(
+    b::Vector{Float64},
+    g::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    p::Vector{Float64},
+    q::Vector{Float64},
+    vg::Vector{Float64},
+    th_slack::Float64,
+    mat::Matrices,
+    id::Indices;
+    Niter = 3::Int64,
+    const_jac = false::Bool
+)
+    v = zeros(id.Nbus)
+    th = zeros(id.Nbus)
+    v = v + mat.pv2full * vg  + mat.pq2full * ones(length(id.pq)) 
+    th = th + vec(mat.s2full * th_slack)
+
+    v_new = zeros(id.Nbus)
+    th_new = zeros(id.Nbus)
+
+    if const_jac
+        jac = jacob(b, g, bsh, gsh, v, th, mat, id)
+    end
+
+    for i in 1:Niter
+        dpq = dPQ(b, g, bsh, gsh, v, th, mat, id, p, q)
+        if const_jac == false
+            jac = jacob(b, g, bsh, gsh, v, th, mat, id)
+        end
+        x = jac \ dpq
+        #x = idrs(jac, dpq,s=1) # blow the memory during the compiling!
+        th_new = th - mat.ns2full * x[1:id.Nbus-1]
+        v_new = v - mat.pq2full * x[id.Nbus:end]
+        v = v_new
+        th = th_new
+    end
+    
+    return th, v
+end
+
+
 function dPQ(
     b::Vector{Float64},
     g::Vector{Float64},
@@ -99,49 +214,6 @@ function jacob(
     
 end
 
-function newton_raphson_scheme(
-    b::Vector{Float64},
-    g::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    p::Vector{Float64},
-    q::Vector{Float64},
-    vg::Vector{Float64},
-    theta_slack::Float64,
-    mat::Matrices,
-    id::Indices;
-    Niter = 3::Int64,
-    const_jac = false::Bool
-)
-    v = zeros(id.Nbus)
-    th = zeros(id.Nbus)
-    v = v + mat.pv2full * vg  + mat.pq2full * ones(length(id.pq)) 
-    th = th + vec(mat.s2full * theta_slack)
-
-    v_new = zeros(id.Nbus)
-    th_new = zeros(id.Nbus)
-
-    if const_jac
-        jac = jacob(b, g, bsh, gsh, v, th, mat, id)
-    end
-
-    for i in 1:Niter
-        dpq = dPQ(b, g, bsh, gsh, v, th, mat, id, p, q)
-        if const_jac == false
-            jac = jacob(b, g, bsh, gsh, v, th, mat, id)
-        end
-        x = jac \ dpq
-        #x = idrs(jac, dpq,s=1) # blow the memory during the compiling!
-        th_new = th - mat.ns2full * x[1:id.Nbus-1]
-        v_new = v - mat.pq2full * x[id.Nbus:end]
-        v = v_new
-        th = th_new
-    end
-    
-    return th, v
-end
-
-
 
 function v2s_map(
     b::Vector{Float64},
@@ -174,84 +246,5 @@ function v2s_map(
 end
 
 
-function full_obs_missmatch(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    p::Vector{Float64},
-    q::Vector{Float64},
-    vg::Vector{Float64},
-    theta_slack::Float64,
-    thref::Vector{Float64},
-    vref::Vector{Float64},
-    pref::Vector{Float64},
-    qref::Vector{Float64},
-    mat::Matrices,
-    id::Indices;
-    Niter = 3::Int64,
-    const_jac::Bool,
-)
-    b = -exp.(beta)
-    g = exp.(gamma)
-    th, v = newton_raphson_scheme(b, g, bsh, gsh, p, q, vg,
-        theta_slack, mat, id, Niter = Niter, const_jac = const_jac)
-    p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
-
-    return sum(abs.(th - thref)) + sum(abs.(v - vref)) +
-        sum(abs.(p_est - pref)) + sum(abs.(q_est - qref)) 
-end
 
 
-function batch_train!(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    p::Matrix{Float64},
-    q::Matrix{Float64},
-    vg::Matrix{Float64},
-    th_slack::Vector{Float64},
-    thref::Matrix{Float64},
-    vref::Matrix{Float64},
-    pref::Matrix{Float64},
-    qref::Matrix{Float64},
-    mat::Matrices,
-    id::Indices,
-    opt;
-    Niter = 3::Int64,
-    Ninter = 10::Int64,
-    Nepoch = 10::Int64,
-    const_jac = false::Bool,
-)
-    Nbatch = size(vg, 2)
-    for e = 1:Nepoch
-        grad = (zeros(length(beta)), zeros(length(beta)),
-            zeros(length(gsh)), zeros(length(bsh)))
-        for i in 1:Nbatch
-            g = gradient((beta, gamma, bsh, gsh) -> full_obs_missmatch(beta,
-                gamma, bsh, gsh, p[:,i], q[:,i], vg[:,i],
-                th_slack[i], thref[:,i], vref[:,i], pref[:,i],
-                qref[:,i], mat, id, Niter = Niter, const_jac = const_jac),
-                beta, gamma, bsh, gsh)
-            grad[1] .+= g[1] / Nbatch
-            grad[2] .+= g[2] / Nbatch
-            grad[3] .+= g[3] / Nbatch
-            grad[4] .+= g[4] / Nbatch
-        end
-        Flux.update!(opt, beta, grad[1])
-        Flux.update!(opt, gamma, grad[2])
-        Flux.update!(opt, bsh, grad[3])
-        Flux.update!(opt, gsh, grad[4])
-        if(mod(e, Ninter) == 0)
-            error = 0
-            for i in 1:Nbatch
-                error += full_obs_missmatch(beta, gamma, bsh, gsh, p[:,i],
-                q[:,i], vg[:,i], th_slack[i], thref[:,i], vref[:,i], pref[:,i],
-                qref[:,i], mat, id, Niter = Niter, const_jac = const_jac)
-            end
-            println([e, error])
-        end
-    end
-    return nothing
-end

@@ -8,6 +8,17 @@ function create_indices(slack::Int64, id_pv::Vector{Int64}, Nbus::Int64)
 end
 
 
+function save_grid_params(filename::String)
+    if isfile(filename)
+        rm(filename)
+    end
+    h5write(filename, "/beta", beta)
+    h5write(filename, "/gamma", gamma)
+    h5write(filename, "/bsh", bsh)
+    h5write(filename, "/gsh", gsh)
+end
+
+
 function load_data(filename::String)
     data = h5read(filename, "/")
     vref = data["V"]
@@ -97,6 +108,7 @@ function generate_full_line_list(
     end
     return [id1 id2]
 end
+
 
 function generate_neighbour_list(
     epsilon::Matrix{Int64},
