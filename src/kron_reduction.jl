@@ -1,8 +1,10 @@
+export kron_reduction, build_admittance_matrix
+
 function kron_reduction(
     Y::SparseMatrixCSC{ComplexF64, Int64},
     obs::Vector{Int64},
     nobs::Vector{Int64};
-    alpha = 1E-1::Float64
+    alpha::Float64 = 1E-1,
 )
     Nobs = length(obs)
     Nnobs = length(nobs)

@@ -1,4 +1,4 @@
-export train_V2S_map!, train_n_update_V2S_map!
+export train_V2S_map!, train_n_update_V2S_map!, train_hybrid_V2S_map!
 
 #using Zygote
 
@@ -128,22 +128,25 @@ function train_hybrid_V2S_map!(
     qref::Matrix{Float64},
     mat::Matrices,
     id::Indices,
-    c::Flux.Chain;
-    Niter::Int64 = 3,
+    c::Flux.Chain,
+    opt;
+    Ninter::Int64 = 3,
     Nepoch::Int64 = 10,
+    reg = 100
 )
     Nbatch = size(v,2)    
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
-    ps = Params(c, beta, gamma, bsh, gsh)
+    ps = params(c, beta, gamma, bsh, gsh)
     for e in 1:Nepoch
         gs = gradient(ps) do
             b = -exp.(beta)
             g = exp.(gamma)
             p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
             x = c([v;th])
-            #reg = sum(abs2, c[])
             return sum(abs.(p + x[1:id.Nbus,:] - pref)) +
-                sum(abs.(q + x[id.Nbus+1:end,:] - qref))
+                sum(abs.(q + x[id.Nbus+1:end,:] - qref)) +
+                reg * (sum(abs2, c[end].weight) +
+                sum(abs2, c[end].weight))
         end
         
         Flux.update!(opt, ps, gs)
