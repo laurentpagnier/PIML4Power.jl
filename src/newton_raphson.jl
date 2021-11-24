@@ -19,10 +19,10 @@ function batch_train!(
     mat::Matrices,
     id::Indices,
     opt;
-    Niter = 3::Int64,
-    Ninter = 10::Int64,
-    Nepoch = 10::Int64,
-    const_jac = false::Bool,
+    Niter::Int64 = 3,
+    Ninter::Int64 = 10,
+    Nepoch::Int64 = 10,
+    const_jac::Bool = false,
 )
     Nbatch = size(vg, 2)
     ps = params(beta, gamma, bsh, gsh)
@@ -53,9 +53,6 @@ function batch_train!(
         if(mod(e, Ninter) == 0)
             error = 0
             for i in 1:Nbatch
-                #error += full_obs_missmatch(beta, gamma, bsh, gsh, p[:,i],
-                #q[:,i], vg[:,i], th_slack[i], thref[:,i], vref[:,i], pref[:,i],
-                #qref[:,i], mat, id, Niter = Niter, const_jac = const_jac)
                 b = -exp.(beta)
                 g = exp.(gamma)
                 th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,i], q[:,i], vg[:,i],
@@ -85,8 +82,8 @@ function newton_raphson_scheme(
     th_slack::Float64,
     mat::Matrices,
     id::Indices;
-    Niter = 3::Int64,
-    const_jac = false::Bool
+    Niter::Int64 = 3,
+    const_jac::Bool = false,
 )
     v = zeros(id.Nbus)
     th = zeros(id.Nbus)

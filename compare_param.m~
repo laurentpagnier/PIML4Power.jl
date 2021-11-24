@@ -1,0 +1,14 @@
+beta = h5read('param.h5','/beta');
+gamma = h5read('param.h5','/gamma');
+epsilon = h5read('param.h5','/epsilon');
+bsh = h5read('param.h5','/bsh');
+gsh = h5read('param.h5','/gsh');
+
+
+loc = '/home/laurent/Dropbox/Research/PIML Julia/data/dataset_118_case_3.h5';
+
+g_ref = h5read(loc,'/g');
+b_ref = h5read(loc,'/b');
+epsilon_ref = h5read(loc,'/epsilon');
+bsh_ref = h5read(loc,'/bsh');
+gsh_ref = h5read(loc,'/gsh');

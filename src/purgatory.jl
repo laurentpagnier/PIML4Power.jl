@@ -30,6 +30,66 @@ end
 
 
 #=
+function train_n_update_V2S_map!(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    th::Matrix{Float64},
+    v::Matrix{Float64},
+    pref::Matrix{Float64},
+    qref::Matrix{Float64},
+    epsilon::Matrix{Int64},
+    mat::Matrices,
+    id::Indices,
+    opt;
+    Ninter::Int64 = 5,
+    Nepoch::Int64 = 10,
+    beta_thres::Float64 = -3.0,
+)
+    Nbatch = size(v, 2)   
+    id_kept = trues(size(beta))
+    Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
+    ps = params(beta, gamma, bsh, gsh)
+    for e in 1:Nepoch
+        gs = gradient(ps) do
+            b = -exp.(beta[id_kept])
+            g = exp.(gamma[id_kept])
+            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+            return sum(abs.(p-pref)) + sum(abs.(q-qref))
+        end
+        
+        Flux.update!(opt, ps, gs)
+        
+        if(mod(e, Ninter) == 0)
+            # if beta is smaller than a threshold, one ass
+            id_kept = beta .> beta_thres
+            mat = create_incidence_matrices(epsilon[id_kept,:], id)
+            Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
+            b = -exp.(beta[id_kept])
+            g = exp.(gamma[id_kept])
+            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+            error = (sum(abs.(p-pref)) + sum(abs.(q-qref)))  / 2.0 /
+                prod(size(pref))
+            println([e error sum(id_kept)])
+            #ps = params(beta, gamma, bsh, gsh)
+        end
+    end
+    #println(sum(id_kept))
+    #println(beta[id_kept])
+    #println(size(beta[id_kept]))
+    #temp_beta = beta[id_kept]
+    #temp_gamma = gamma[id_kept]
+    #temp_epsilon = epsilon[id_kept]
+    #global beta = temp_beta
+    #global gamma = temp_gamma
+    #global epsilon = temp_epsilon
+    return id_kept
+end
+=#
+
+
+#=
 function V2S_loss(
     beta::Vector{Float64},
     gamma::Vector{Float64},

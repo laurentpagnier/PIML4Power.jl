@@ -1,4 +1,4 @@
-export train_V2S_map!
+export train_V2S_map!, train_n_update_V2S_map!
 
 #using Zygote
 
@@ -53,8 +53,8 @@ function train_V2S_map!(
     mat::Matrices,
     id::Indices,
     opt;
-    Ninter = 5::Int64,
-    Nepoch = 10::Int64,
+    Ninter::Int64 = 5,
+    Nepoch::Int64 = 10,
 )
     Nbatch = size(v,2)    
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
@@ -92,44 +92,28 @@ function train_n_update_V2S_map!(
     pref::Matrix{Float64},
     qref::Matrix{Float64},
     epsilon::Matrix{Int64},
-    mat::Matrices,
     id::Indices,
     opt;
-    Ninter = 5::Int64,
-    Nepoch = 10::Int64,
-    beta_thres = -3.0::Float64,
+    Ninter::Int64 = 5,
+    Nepoch::Int64 = 10,
+    beta_thres::Float64 = -3.0,
 )
-    Nbatch = size(v,2)    
-    Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
-    ps = params(beta, gamma, bsh, gsh)
+    Nbatch = size(v, 2)
+    beta_local = copy(beta)
+    gamma_local = copy(gamma)
+    epsilon_local = copy(epsilon)
     for e in 1:Nepoch
-        gs = gradient(ps) do
-            b = -exp.(beta)
-            g = exp.(gamma)
-            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            return sum(abs.(p-pref)) + sum(abs.(q-qref))
-        end
-        
-        Flux.update!(opt, ps, gs)
-        
-        if(mod(e, Ninter) == 0)
-            # if beta is smaller than a threshold, one ass
-            id_kept = beta .> beta_thres
-            beta = b[id_kept]
-            beta = beta[id_kept]
-            epsilon = epsilon[id_kept,:]
-            mat = create_incidence_matrices(epsilon, id)
-            Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
-            b = -exp.(beta)
-            g = exp.(gamma)
-            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            error = (sum(abs.(p-pref)) + sum(abs.(q-qref)))  / 2.0 /
-                prod(size(pref))
-            println([e error sum(id_kept)])
-            ps = params(beta, gamma, bsh, gsh)
-        end
+        mat2 = create_incidence_matrices(epsilon_local, id)
+        # if beta is smaller than a threshold, one ass
+        train_V2S_map!(beta_local, gamma_local, bsh, gsh, th, v, pref, qref, mat2,
+            id, opt, Ninter = 50, Nepoch = Ninter)
+        id_kept = beta_local .> beta_thres
+        epsilon_local = epsilon_local[id_kept,:]
+        beta_local = beta_local[id_kept]
+        gamma_local = gamma_local[id_kept]
+        println([e, sum(id_kept)])
     end
-    return nothing
+    return beta_local, gamma_local, bsh, gsh, epsilon_local
 end
 
 
@@ -145,8 +129,8 @@ function train_hybrid_V2S_map!(
     mat::Matrices,
     id::Indices,
     c::Flux.Chain;
-    Niter = 3::Int64,
-    Nepoch = 10::Int64,
+    Niter::Int64 = 3,
+    Nepoch::Int64 = 10,
 )
     Nbatch = size(v,2)    
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
@@ -157,7 +141,7 @@ function train_hybrid_V2S_map!(
             g = exp.(gamma)
             p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
             x = c([v;th])
-            reg = sum(abs2, c[])
+            #reg = sum(abs2, c[])
             return sum(abs.(p + x[1:id.Nbus,:] - pref)) +
                 sum(abs.(q + x[id.Nbus+1:end,:] - qref))
         end

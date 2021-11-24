@@ -16,6 +16,7 @@ function save_grid_params(filename::String)
     h5write(filename, "/gamma", gamma)
     h5write(filename, "/bsh", bsh)
     h5write(filename, "/gsh", gsh)
+    h5write(filename, "/epsilon", epsilon)
 end
 
 
