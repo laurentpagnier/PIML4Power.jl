@@ -145,8 +145,8 @@ function train_hybrid_V2S_map!(
             x = c([v;th])
             return sum(abs.(p + x[1:id.Nbus,:] - pref)) +
                 sum(abs.(q + x[id.Nbus+1:end,:] - qref)) +
-                reg * (sum(abs2, c[end].weight) +
-                sum(abs2, c[end].weight))
+                reg * (sum(abs, c[end].weight) +
+                sum(abs, c[end].weight))
         end
         
         Flux.update!(opt, ps, gs)

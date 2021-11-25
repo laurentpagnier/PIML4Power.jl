@@ -2,6 +2,143 @@ export newton_raphson_scheme, v2s_map, batch_train!
 
 #using IterativeSolvers
 
+function batch_vth_based_train!(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    p::Matrix{Float64},
+    q::Matrix{Float64},
+    vg::Matrix{Float64},
+    th_slack::Vector{Float64},
+    thref::Matrix{Float64},
+    vref::Matrix{Float64},
+    pref::Matrix{Float64},
+    qref::Matrix{Float64},
+    mat::Matrices,
+    id::Indices,
+    opt;
+    Niter::Int64 = 3,
+    Ninter::Int64 = 10,
+    Nepoch::Int64 = 10,
+    const_jac::Bool = false,
+    p_max::Float64 = 8.0,
+)
+    Nbatch = size(vg, 2)
+    ps = params(beta, gamma, bsh, gsh)
+    for e = 1:Nepoch
+        gs = gradient(ps) do
+            b = -exp.(beta)
+            g = exp.(gamma)
+            th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,1], q[:,1],
+                vg[:,1], th_slack[1], mat, id, Niter = Niter,
+                const_jac = const_jac)
+            return sum(abs.(th - thref[:,1])) + sum(abs.(v - vref[:,1]))
+        end
+        for i in 2:Nbatch
+            gs .+= gradient(ps) do
+                b = -exp.(beta)
+                g = exp.(gamma)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,i], q[:,i],
+                    vg[:,i], th_slack[i], mat, id, Niter = Niter,
+                    const_jac = const_jac)
+                return sum(abs.(th - thref[:,i])) + sum(abs.(v - vref[:,i]))
+            end
+        end
+        Flux.update!(opt, ps, gs)
+        beta = min.(beta, p_max)
+        gamma = min.(gamma, p_max)
+        if(mod(e, Ninter) == 0)
+            error = 0
+            error2 = 0
+            for i in 1:Nbatch
+                b = -exp.(beta)
+                g = exp.(gamma)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,i], q[:,i], vg[:,i],
+                    th_slack[i], mat, id, Niter = Niter, const_jac = const_jac)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+                error += (sum(abs.(th - thref[:,i])) + sum(abs.(v - vref[:,i]))) /
+                    2.0 / prod(size(thref))
+                error2 += (sum(abs.(p_est - pref[:,i])) + sum(abs.(q_est - qref[:,i]))) /
+                    2.0 / prod(size(thref))
+            end
+            println([e, error, error2])
+        end
+    end
+    return nothing
+end
+
+
+function batch_pq_based_train!(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    p::Matrix{Float64},
+    q::Matrix{Float64},
+    vg::Matrix{Float64},
+    th_slack::Vector{Float64},
+    thref::Matrix{Float64},
+    vref::Matrix{Float64},
+    pref::Matrix{Float64},
+    qref::Matrix{Float64},
+    mat::Matrices,
+    id::Indices,
+    opt;
+    Niter::Int64 = 3,
+    Ninter::Int64 = 10,
+    Nepoch::Int64 = 10,
+    const_jac::Bool = false,
+    p_max::Float64 = 8.0,
+)
+    Nbatch = size(vg, 2)
+    ps = params(beta, gamma, bsh, gsh)
+    for e = 1:Nepoch
+        gs = gradient(ps) do
+            b = -exp.(beta)
+            g = exp.(gamma)
+            th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,1], q[:,1],
+                vg[:,1], th_slack[1], mat, id, Niter = Niter,
+                const_jac = const_jac)
+            p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+            return sum(abs.(p_est - pref[:,1])) + sum(abs.(q_est - qref[:,1]))
+        end
+        for i in 2:Nbatch
+            gs .+= gradient(ps) do
+                b = -exp.(beta)
+                g = exp.(gamma)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,i], q[:,i],
+                    vg[:,i], th_slack[i], mat, id, Niter = Niter,
+                    const_jac = const_jac)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+                return sum(abs.(p_est - pref[:,i])) + sum(abs.(q_est - qref[:,i]))
+            end
+        end
+        Flux.update!(opt, ps, gs)
+        #beta = min.(beta, p_max)
+        #gamma = min.(gamma, p_max)
+        #ps = params(beta, gamma, bsh, gsh)
+        if(mod(e, Ninter) == 0)
+            error = 0
+            error2 = 0
+            for i in 1:Nbatch
+                b = -exp.(beta)
+                g = exp.(gamma)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,i], q[:,i], vg[:,i],
+                    th_slack[i], mat, id, Niter = Niter, const_jac = const_jac)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+                error += (sum(abs.(th - thref[:,i])) + sum(abs.(v - vref[:,i]))) /
+                    2.0 / prod(size(thref))
+                error2 += (sum(abs.(p_est - pref[:,i])) + sum(abs.(q_est - qref[:,i]))) /
+                    2.0 / prod(size(thref))
+            end
+            println([e, error, error2])
+            #println(beta)
+        end
+    end
+    return nothing
+end
+
 
 function batch_train!(
     beta::Vector{Float64},
@@ -23,6 +160,7 @@ function batch_train!(
     Ninter::Int64 = 10,
     Nepoch::Int64 = 10,
     const_jac::Bool = false,
+    p_max::Float64 = 8.0,
 )
     Nbatch = size(vg, 2)
     ps = params(beta, gamma, bsh, gsh)
@@ -50,6 +188,8 @@ function batch_train!(
             end
         end
         Flux.update!(opt, ps, gs)
+        beta = min.(beta, p_max)
+        gamma = min.(gamma, p_max)
         if(mod(e, Ninter) == 0)
             error = 0
             for i in 1:Nbatch
@@ -61,7 +201,7 @@ function batch_train!(
 
                 error += (sum(abs.(th - thref[:,i])) + sum(abs.(v - vref[:,i])) +
                     sum(abs.(p_est - pref[:,i])) + sum(abs.(q_est - qref[:,i]))) /
-                    2.0 / prod(size(thref))
+                    4.0 / prod(size(thref))
                 
             end
             println([e, error])
