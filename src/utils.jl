@@ -1,9 +1,9 @@
 export load_data, generate_full_line_list, generate_neighbour_list
 
-function create_indices(slack::Int64, id_pv::Vector{Int64}, Nbus::Int64)
+function create_indices(slack::Int64, id_pv::Vector{Int64}, Nbus::Int64, epsilon::Matrix{Int64})
     ns = setdiff(collect(1:Nbus), slack) # indices of non-slack buses
     pq = setdiff(collect(1:Nbus), id_pv) # indices of PV buses (and slack)
-    return Indices(slack, id_pv, pq, ns, Nbus)
+    return Indices(slack, id_pv, pq, ns, Nbus, epsilon)
 end
 
 
@@ -34,26 +34,27 @@ function load_data(filename::String)
     bsh_ref = vec(data["bsh"])
     id_slack = Int64(data["id_slack"][1])
     id_pv = vec(Int64.(data["idgen"]))
-    id = create_indices(id_slack, id_pv, size(vref,1))
-    mat = create_incidence_matrices(epsilon, id)
-    return vref, thref, pref, qref, epsilon, g_ref, gsh_ref, b_ref, bsh_ref, mat, id
+    id = create_indices(id_slack, id_pv, size(vref,1), epsilon)
+    mat = create_incidence_matrices(id)
+    data = SystemData(vref, thref, pref, qref, epsilon, b_ref, g_ref,
+        bsh_ref, gsh_ref)
+    return data, mat, id
 end
 
 
-function create_incidence_matrices(epsilon::Matrix{Int64}, id::Indices)
-    Nline = size(epsilon,1)
-    Nbus = maximum(epsilon)
+function create_incidence_matrices(id::Indices)
+    Nline = size(id.epsilon, 1)
+    Nbus = maximum(id.epsilon)
 
-    Bout = sparse(epsilon[:,1], 1:Nline, ones(Nline), Nbus, Nline)
-    Bin = sparse(epsilon[:,2], 1:Nline, ones(Nline), Nbus, Nline)
-    Bm = sparse([epsilon[:,1]; epsilon[:,2]], [1:Nline; 1:Nline],
+    Bout = sparse(id.epsilon[:,1], 1:Nline, ones(Nline), Nbus, Nline)
+    Bin = sparse(id.epsilon[:,2], 1:Nline, ones(Nline), Nbus, Nline)
+    Bm = sparse([id.epsilon[:,1]; id.epsilon[:,2]], [1:Nline; 1:Nline],
         [-ones(Nline); ones(Nline)], Nbus, Nline)
-    Bp = sparse([epsilon[:,1]; epsilon[:,2]], [1:Nline; 1:Nline],
+    Bp = sparse([id.epsilon[:,1]; id.epsilon[:,2]], [1:Nline; 1:Nline],
         [ones(Nline); ones(Nline)], Nbus, Nline)
 
     temp = zeros(length(id.pq))
     for i in 1:length(id.pq)
-    
         temp[i] = findall(id.ns .== id.pq[i])[1]
     end
     pq2ns = sparse(temp, 1:length(id.pq),

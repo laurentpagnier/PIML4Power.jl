@@ -41,7 +41,22 @@ struct Indices
     pq::Vector{Int64}
     ns::Vector{Int64}
     Nbus::Int64
+    epsilon::Matrix{Int64}
 end
+
+
+struct SystemData
+    v::Matrix{Float64}
+    th::Matrix{Float64}
+    p::Matrix{Float64}
+    q::Matrix{Float64}
+    epsilon::Matrix{Int64}
+    b::Vector{Float64}
+    g::Vector{Float64}
+    bsh::Vector{Float64}
+    gsh::Vector{Float64}
+end
+
 
 include("utils.jl")
 include("newton_raphson.jl")
