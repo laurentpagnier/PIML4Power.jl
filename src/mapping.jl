@@ -132,11 +132,13 @@ function train_hybrid_V2S_map!(
     opt;
     Ninter::Int64 = 3,
     Nepoch::Int64 = 10,
-    reg = 100
+    reg = 1
 )
     Nbatch = size(v,2)    
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
     ps = params(c, beta, gamma, bsh, gsh)
+    nbias = prod(size(c[end].bias))
+    nw = prod(size(c[end].weight))
     for e in 1:Nepoch
         gs = gradient(ps) do
             b = -exp.(beta)
@@ -145,8 +147,8 @@ function train_hybrid_V2S_map!(
             x = c([v;th])
             return sum(abs.(p + x[1:id.Nbus,:] - pref)) +
                 sum(abs.(q + x[id.Nbus+1:end,:] - qref)) +
-                reg * (sum(abs, c[end].weight) +
-                sum(abs, c[end].weight))
+                reg * (sum(abs, c[end].weight) / nw +
+                sum(abs, c[end].bias) / nbias) 
         end
         
         Flux.update!(opt, ps, gs)

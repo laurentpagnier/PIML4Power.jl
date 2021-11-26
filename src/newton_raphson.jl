@@ -101,7 +101,7 @@ function batch_pq_based_train!(
                 vg[:,1], th_slack[1], mat, id, Niter = Niter,
                 const_jac = const_jac)
             p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
-            return sum(abs.(p_est - pref[:,1])) + sum(abs.(q_est - qref[:,1]))
+            return sum(abs.(p_est[id.pv] - pref[id.pv,1])) + sum(abs.(q_est[id.pq] - qref[id.pq,1]))
         end
         for i in 2:Nbatch
             gs .+= gradient(ps) do
@@ -111,7 +111,7 @@ function batch_pq_based_train!(
                     vg[:,i], th_slack[i], mat, id, Niter = Niter,
                     const_jac = const_jac)
                 p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
-                return sum(abs.(p_est - pref[:,i])) + sum(abs.(q_est - qref[:,i]))
+                return sum(abs.(p_est[id.pv] - pref[id.pv,i])) + sum(abs.(q_est[id.pq] - qref[id.pq,i]))
             end
         end
         Flux.update!(opt, ps, gs)

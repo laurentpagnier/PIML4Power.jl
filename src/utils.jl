@@ -1,6 +1,5 @@
 export load_data, generate_full_line_list, generate_neighbour_list
 
-
 function create_indices(slack::Int64, id_pv::Vector{Int64}, Nbus::Int64)
     ns = setdiff(collect(1:Nbus), slack) # indices of non-slack buses
     pq = setdiff(collect(1:Nbus), id_pv) # indices of PV buses (and slack)
@@ -136,4 +135,47 @@ function generate_neighbour_list(
         end
     end
     return [id1 id2]
+end
+
+
+function compare_params_2_admittance(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    b_ref::Vector{Float64},
+    g_ref::Vector{Float64},
+    bsh_ref::Vector{Float64},
+    gsh_ref::Vector{Float64},
+    mat::Matrices,
+)
+    g = exp.(gamma)
+    b = -exp.(beta)
+    y = g + im * b
+    y_ref = g_ref + im * b_ref 
+    dy = y - y_ref
+    Gsh = mat.Bp * g + gsh
+    Bsh = mat.Bp * b + bsh
+    ysh = Gsh + im * Bsh
+    Gsh_ref = mat.Bp * g_ref + gsh_ref
+    Bsh_ref = mat.Bp * b_ref + bsh_ref
+    ysh_ref = Gsh_ref + im * Bsh_ref
+    dysh = ysh - ysh_ref
+    return sqrt(2 * sum(abs2, dy) + sum(abs2, dysh))
+end
+
+
+function compare_params_2_admittance(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    epsilon::Matrix{Int64},
+    Yref::SparseMatrixCSC{ComplexF64, Int64},
+)
+    g = exp.(gamma)
+    b = -exp.(beta)
+    Y = build_admittance_matrix(b, g, bsh, gsh, epsilon)
+    
+    return norm(Y - Yref)
 end
