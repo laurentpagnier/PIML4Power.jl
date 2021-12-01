@@ -33,7 +33,7 @@ function batch_vth_based_train!(
             th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,1], q[:,1],
                 vg[:,1], th_slack[1], mat, id, Niter = Niter,
                 const_jac = const_jac)
-            return sum(abs.(th - thref[:,1])) + sum(abs.(v - vref[:,1]))
+            return sum(abs.(th[id.ns] - thref[id.ns,1])) + sum(abs.(v[id.pv] - vref[id.pv,1]))
         end
         for i in 2:Nbatch
             gs .+= gradient(ps) do
@@ -42,7 +42,7 @@ function batch_vth_based_train!(
                 th, v = newton_raphson_scheme(b, g, bsh, gsh, p[:,i], q[:,i],
                     vg[:,i], th_slack[i], mat, id, Niter = Niter,
                     const_jac = const_jac)
-                return sum(abs.(th - thref[:,i])) + sum(abs.(v - vref[:,i]))
+                return sum(abs.(th[id.ns] - thref[id.ns,i])) + sum(abs.(v[id.pv] - vref[id.pv,i]))
             end
         end
         Flux.update!(opt, ps, gs)
@@ -101,8 +101,8 @@ function batch_pq_based_train!(
                 vg[:,1], th_slack[1], mat, id, Niter = Niter,
                 const_jac = const_jac)
             p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
-            return sum(abs.(p_est[id.pv] - pref[id.pv,1])) + sum(abs.(q_est[id.pq] - qref[id.pq,1])) +
-                sum(abs.(th[id.pv] - thref[id.pv,1]))
+            return sum(abs, p_est[id.slack] - pref[id.slack,1]) + sum(abs, q_est[id.pv] - qref[id.pv,1])
+                + sum(abs, th[id.ns] - thref[id.ns,1]) + sum(abs, v[id.pq] - vref[id.pq,1]) 
             #return maximum(abs.(p_est[id.pv] - pref[id.pv,1])) + maximum(abs.(q_est[id.pq] - qref[id.pq,1]))
         end
         for i in 2:Nbatch
@@ -113,8 +113,8 @@ function batch_pq_based_train!(
                     vg[:,i], th_slack[i], mat, id, Niter = Niter,
                     const_jac = const_jac)
                 p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
-                return sum(abs.(p_est[id.pv] - pref[id.pv,i])) + sum(abs.(q_est[id.pq] - qref[id.pq,i])) +
-                    sum(abs.(th[id.pv] - thref[id.pv,1]))
+                return sum(abs, p_est[id.slack] - pref[id.slack,i]) + sum(abs, q_est[id.pv] - qref[id.pv,i])
+                    + sum(abs, th[id.ns] - thref[id.ns,i]) + sum(abs, v[id.pq] - vref[id.pq,i]) 
                 #return maximum(abs.(p_est[id.pv] - pref[id.pv,i])) + maximum(abs.(q_est[id.pq] - qref[id.pq,i]))
             end
         end
