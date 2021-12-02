@@ -1,6 +1,5 @@
-export train_V2S_map!, train_n_update_V2S_map!, train_hybrid_V2S_map!
-
-#using Zygote
+export train_V2S_map!, train_n_update_V2S_map!, train_hybrid_V2S_map!,
+    load_hybrid_model, save_hybrid_model
 
 function preproc_V2S_map(
     th::Matrix{Float64},
@@ -134,7 +133,6 @@ function train_hybrid_V2S_map!(
     Nepoch::Int64 = 10,
     reg = 1
 )
-    Nbatch = size(v,2)    
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
     ps = params(c, beta, gamma, bsh, gsh)
     nbias = prod(size(c[end].bias))
@@ -158,8 +156,8 @@ function train_hybrid_V2S_map!(
             g = exp.(gamma)
             p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
             x = c([v;th])
-            error = (sum(abs.(p + x[1:id.Nbus,:] - pref)) +
-                sum(abs.(q + x[id.Nbus+1:end,:] - qref))) / 2.0 /
+            error = (sum(abs, p + x[1:id.Nbus,:] - pref) +
+                sum(abs, q + x[id.Nbus+1:end,:] - qref)) / 2.0 /
                 prod(size(pref))
             println([e error])
         end
@@ -168,9 +166,105 @@ function train_hybrid_V2S_map!(
 end
 
 
-function create_simple_full_nn(
-    N::Int64
+function test_hybrid_V2S_map(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    th::Matrix{Float64},
+    v::Matrix{Float64},
+    pref::Matrix{Float64},
+    qref::Matrix{Float64},
+    mat::Matrices,
+    id::Indices,
+    c::Flux.Chain,
 )
-    return c = Chain(Dense(2*N,2*Ntanh), Dense(2*N,2*N, tanh),
-        Dense(2*N,2*N,tanh), Dense(2*N,2*N))
+    b = -exp.(beta)
+    g = exp.(gamma)
+    Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
+    p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+    x = c([v;th])
+    error = (sum(abs, p + x[1:id.Nbus,:] - pref) +
+    sum(abs, q + x[id.Nbus+1:end,:] - qref)) / 2.0 /
+    prod(size(pref))
+    return error, maximum(abs.(x))
+end
+
+
+function test_hybrid_V2S_map(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    th::Matrix{Float64},
+    v::Matrix{Float64},
+    pref::Matrix{Float64},
+    qref::Matrix{Float64},
+    yref::Vector{ComplexF64},
+    ysh_ref::Vector{ComplexF64},
+    mat::Matrices,
+    id::Indices,
+    c::Flux.Chain,
+)
+    error, max_x = test_hybrid_V2S_map(beta, gamma, bsh, gsh, th, v, pref, qref,
+        mat, id, c)
+    dy = compare_params_2_admittance(beta, gamma, bsh, gsh, imag(yref),
+        real(yref), imag(ysh_ref), real(ysh_ref), mat)
+    return error, max_x, dy
+end
+
+
+function save_hybrid_model(
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+    epsilon::Matrix{Int64},
+    nn, # a Flux neural network (i.e. Chain)
+    rootname::String,
+)
+    if(isfile(rootname * ".h5"))
+        HDF5.h5open(rootname * ".h5","w") do fid
+            fid["/beta"] = beta
+            fid["/gamma"] = gamma
+            fid["/bsh"] = bsh
+            fid["/gsh"] = gsh
+            fid["/epsilon"] = epsilon
+            close(fid)
+        end
+    else
+        h5write(rootname * ".h5", "/beta", beta)
+        h5write(rootname * ".h5", "/gamma", gamma)
+        h5write(rootname * ".h5", "/bsh", bsh)
+        h5write(rootname * ".h5", "/gsh", gsh)
+        h5write(rootname * ".h5", "/epsilon", epsilon)
+    end
+    @save rootname * ".bson" nn
+    return nothing
+end
+
+
+function load_hybrid_model(
+    rootname::String,
+)
+    param = h5read(rootname * ".h5","/")
+    beta = param["beta"]
+    gamma = param["gamma"]
+    bsh = param["bsh"]
+    gsh = param["gsh"]
+    epsilon = Int64.(param["epsilon"])
+    @load rootname * ".bson" nn
+    id = create_indices(1, collect(1:maximum(epsilon)),
+        maximum(epsilon), epsilon) # dummy way to do so as we mostly want epsilon
+    mat = create_incidence_matrices(id)
+    return beta, gamma, bsh, gsh, mat, id, nn
+end
+
+
+function create_simple_full_nn(
+    N::Int64;
+    act_fun = tanh
+)
+    return c = Chain(Dense(2*N,2*Ntanh,act_fun), Dense(2*N,2*N, act_fun),
+        Dense(2*N,2*N,act_fun), Dense(2*N,2*N))
 end
