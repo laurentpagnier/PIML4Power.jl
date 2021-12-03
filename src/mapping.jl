@@ -159,7 +159,7 @@ function train_hybrid_V2S_map!(
             error = (sum(abs, p + x[1:id.Nbus,:] - pref) +
                 sum(abs, q + x[id.Nbus+1:end,:] - qref)) / 2.0 /
                 prod(size(pref))
-            println([e error])
+            println([e error maximum(abs.(x)) sum(abs.(x)) / prod(size(x))])
         end
     end  
     return nothing
@@ -187,7 +187,7 @@ function test_hybrid_V2S_map(
     error = (sum(abs, p + x[1:id.Nbus,:] - pref) +
     sum(abs, q + x[id.Nbus+1:end,:] - qref)) / 2.0 /
     prod(size(pref))
-    return error, maximum(abs.(x))
+    return error, maximum(abs.(x)), sum(abs.(x)) / prod(size(x))
 end
 
 
@@ -206,11 +206,11 @@ function test_hybrid_V2S_map(
     id::Indices,
     c::Flux.Chain,
 )
-    error, max_x = test_hybrid_V2S_map(beta, gamma, bsh, gsh, th, v, pref, qref,
+    error, max_x, avg_x = test_hybrid_V2S_map(beta, gamma, bsh, gsh, th, v, pref, qref,
         mat, id, c)
     dy = compare_params_2_admittance(beta, gamma, bsh, gsh, imag(yref),
         real(yref), imag(ysh_ref), real(ysh_ref), mat)
-    return error, max_x, dy
+    return error, max_x, avg_x, dy
 end
 
 
