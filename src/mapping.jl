@@ -143,10 +143,12 @@ function train_hybrid_V2S_map!(
             g = exp.(gamma)
             p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
             x = c([v;th])
-            return sum(abs.(p + x[1:id.Nbus,:] - pref)) +
-                sum(abs.(q + x[id.Nbus+1:end,:] - qref)) +
-                reg * (sum(abs, c[end].weight) / nw +
+            ds = (sum(abs, p + x[1:id.Nbus,:] - pref) +
+                sum(abs, q + x[id.Nbus+1:end,:] - qref)) /
+                2.0 / prod(size(pref))
+            dw = (sum(abs, c[end].weight) / nw +
                 sum(abs, c[end].bias) / nbias) 
+            return ds  + reg * dw 
         end
         
         Flux.update!(opt, ps, gs)
@@ -177,13 +179,13 @@ function test_hybrid_V2S_map(
     qref::Matrix{Float64},
     mat::Matrices,
     id::Indices,
-    c::Flux.Chain,
+    nn::Flux.Chain,
 )
     b = -exp.(beta)
     g = exp.(gamma)
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
     p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-    x = c([v;th])
+    x = nn([v;th])
     error = (sum(abs, p + x[1:id.Nbus,:] - pref) +
     sum(abs, q + x[id.Nbus+1:end,:] - qref)) / 2.0 /
     prod(size(pref))
@@ -204,10 +206,10 @@ function test_hybrid_V2S_map(
     ysh_ref::Vector{ComplexF64},
     mat::Matrices,
     id::Indices,
-    c::Flux.Chain,
+    nn::Flux.Chain,
 )
     error, max_x, avg_x = test_hybrid_V2S_map(beta, gamma, bsh, gsh, th, v, pref, qref,
-        mat, id, c)
+        mat, id, nn)
     dy = compare_params_2_admittance(beta, gamma, bsh, gsh, imag(yref),
         real(yref), imag(ysh_ref), real(ysh_ref), mat)
     return error, max_x, avg_x, dy

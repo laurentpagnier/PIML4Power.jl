@@ -35,6 +35,27 @@ function kron_reduction(
 end
 
 
+function contribution_of_nobs_buses(
+    Y::SparseMatrixCSC{ComplexF64, Int64},
+    obs::Vector{Int64},
+    nobs::Vector{Int64},
+    th::Matrix{Float64},
+    v::Matrix{Float64},
+    p::Matrix{Float64},
+    q::Matrix{Float64},
+)
+    Nobs = length(obs)
+    Nnobs = length(nobs)
+    Y12 = Y[obs, nobs]
+    Y22 = Y[nobs, nobs]
+    
+    V = v .* exp.(im .* th)
+    Iu = conj((p[nobs,:] + im * q[nobs,:]) ./ V[nobs,:])
+    S = V[obs,:] .* conj(Y12 * (Y22 \ Iu))
+    return  real(S), imag(S)
+end
+
+
 function build_admittance_matrix(
     b::Vector{Float64},
     g::Vector{Float64},
