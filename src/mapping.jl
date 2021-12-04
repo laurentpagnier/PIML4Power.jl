@@ -41,40 +41,37 @@ end
 
 
 function train_V2S_map!(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    th::Matrix{Float64},
-    v::Matrix{Float64},
-    pref::Matrix{Float64},
-    qref::Matrix{Float64},
+    gm::GridModel,
+    data::SystemData,
     mat::Matrices,
     id::Indices,
+    id_batch::Vector{Int64},
     opt;
     Ninter::Int64 = 5,
     Nepoch::Int64 = 10,
 )
-    Nbatch = size(v,2)    
-    Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
-    ps = params(beta, gamma, bsh, gsh)
+    Nbatch = size(id_batch, 2)    
+    Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th[:,id_batch], data.v[:,id_batch], mat, id)
+    ps = params(gm.beta, gm.gamma, gm.bsh, gm.gsh)
     for e in 1:Nepoch
         gs = gradient(ps) do
-            b = -exp.(beta)
-            g = exp.(gamma)
-            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            return sum(abs.(p-pref)) + sum(abs.(q-qref))
+            b = -exp.(gm.beta)
+            g = exp.(gm.gamma)
+            p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
+            return sum(abs, p - data.p[:,id_batch]) + sum(abs, q - data.q[:, id_batch])
         end
         
         Flux.update!(opt, ps, gs)
         
         if(mod(e, Ninter) == 0)
-            b = -exp.(beta)
-            g = exp.(gamma)
-            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            error = (sum(abs.(p-pref)) + sum(abs.(q-qref)))  / 2.0 /
-                prod(size(pref))
-            println([e error])
+            b = -exp.(gm.beta)
+            g = exp.(gm.gamma)
+            p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
+            error = (sum(abs, p - data.p[:,id_batch]) + sum(abs, q - data.q[:,id_batch])) / 2.0 /
+                Nbatch / id.Nbus
+            dy = compare_params_2_admittance(gm.beta, gm.gamma, gm.bsh, gm.gsh,
+                data.b, data.g, data.bsh, data.gsh, mat)
+            println([e error dy])
         end
     end  
     return nothing
@@ -82,14 +79,8 @@ end
 
 
 function train_n_update_V2S_map!(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    th::Matrix{Float64},
-    v::Matrix{Float64},
-    pref::Matrix{Float64},
-    qref::Matrix{Float64},
+    gm::GridModel,
+    data::SystemData,
     epsilon::Matrix{Int64},
     id::Indices,
     opt;
@@ -97,14 +88,11 @@ function train_n_update_V2S_map!(
     Nepoch::Int64 = 10,
     beta_thres::Float64 = -3.0,
 )
-    Nbatch = size(v, 2)
-    beta_local = copy(beta)
-    gamma_local = copy(gamma)
-    epsilon_local = copy(epsilon)
+    Nbatch = size(id_batch, 2)
     for e in 1:Nepoch
         mat2 = create_incidence_matrices(epsilon_local, id)
         # if beta is smaller than a threshold, one ass
-        train_V2S_map!(beta_local, gamma_local, bsh, gsh, th, v, pref, qref, mat2,
+        train_V2S_map!(gm, data, mat,
             id, opt, Ninter = 50, Nepoch = Ninter)
         id_kept = beta_local .> beta_thres
         epsilon_local = epsilon_local[id_kept,:]
@@ -112,56 +100,56 @@ function train_n_update_V2S_map!(
         gamma_local = gamma_local[id_kept]
         println([e, sum(id_kept)])
     end
+    
     return beta_local, gamma_local, bsh, gsh, epsilon_local
 end
 
 
 function train_hybrid_V2S_map!(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    th::Matrix{Float64},
-    v::Matrix{Float64},
-    pref::Matrix{Float64},
-    qref::Matrix{Float64},
+    gm::GridModel,
+    data::SystemData,
     mat::Matrices,
     id::Indices,
-    c::Flux.Chain,
+    id_batch::Vector{Int64},
+    nn::Flux.Chain,
     opt;
     Ninter::Int64 = 3,
     Nepoch::Int64 = 10,
     reg = 1
 )
-    Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
-    ps = params(c, beta, gamma, bsh, gsh)
-    nbias = prod(size(c[end].bias))
-    nw = prod(size(c[end].weight))
+    Nbatch = size(id_batch, 2)
+    Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th[:,id_batch],
+        data.v[:,id_batch], mat, id)
+    ps = params(nn, gm.beta, gm.gamma, gm.bsh, gm.gsh)
+    nbias = prod(size(nn[end].bias))
+    nw = prod(size(nn[end].weight))
     for e in 1:Nepoch
         gs = gradient(ps) do
-            b = -exp.(beta)
-            g = exp.(gamma)
-            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            x = c([v;th])
-            ds = (sum(abs, p + x[1:id.Nbus,:] - pref) +
-                sum(abs, q + x[id.Nbus+1:end,:] - qref)) /
-                2.0 / prod(size(pref))
-            dw = (sum(abs, c[end].weight) / nw +
-                sum(abs, c[end].bias) / nbias) 
+            b = -exp.(gm.beta)
+            g = exp.(gm.gamma)
+            p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
+            x = nn([data.v[:,id_batch]; data.th[:,id_batch]])
+            ds = (sum(abs, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
+                sum(abs, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) /
+                2.0 / Nbatch / id.Nbus
+            dw = (sum(abs, nn[end].weight) / nw +
+                sum(abs, nn[end].bias) / nbias) 
             return ds  + reg * dw 
         end
         
         Flux.update!(opt, ps, gs)
         
         if(mod(e, Ninter) == 0)
-            b = -exp.(beta)
-            g = exp.(gamma)
-            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            x = c([v;th])
-            error = (sum(abs, p + x[1:id.Nbus,:] - pref) +
-                sum(abs, q + x[id.Nbus+1:end,:] - qref)) / 2.0 /
-                prod(size(pref))
-            println([e error maximum(abs.(x)) sum(abs.(x)) / prod(size(x))])
+            b = -exp.(gm.beta)
+            g = exp.(gm.gamma)
+            p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
+            x = nn([data.v[:,id_batch]; data.th[:,id_batch]])
+            error = (sum(abs, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
+                sum(abs, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) / 2.0 /
+                Nbatch / id.Nbus
+            dy = compare_params_2_admittance(gm.beta, gm.gamma, gm.bsh, gm.gsh,
+                data.b, data.g, data.bsh, data.gsh, mat)
+            println([e error maximum(abs.(x)) sum(abs.(x)) / prod(size(x)) dy])
         end
     end  
     return nothing
@@ -169,84 +157,76 @@ end
 
 
 function test_hybrid_V2S_map(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    th::Matrix{Float64},
-    v::Matrix{Float64},
-    pref::Matrix{Float64},
-    qref::Matrix{Float64},
+    gm::GridModel,
+    data::SystemData,
     mat::Matrices,
     id::Indices,
     nn::Flux.Chain,
 )
-    b = -exp.(beta)
-    g = exp.(gamma)
-    Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
-    p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+    b = -exp.(gm.beta)
+    g = exp.(gm.gamma)
+    Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th, data.v, mat, id)
+    p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
     x = nn([v;th])
-    error = (sum(abs, p + x[1:id.Nbus,:] - pref) +
-    sum(abs, q + x[id.Nbus+1:end,:] - qref)) / 2.0 /
+    error = (sum(abs, p + x[1:id.Nbus,:] - data.p) +
+    sum(abs, q + x[id.Nbus+1:end,:] - data.q)) / 2.0 /
     prod(size(pref))
     return error, maximum(abs.(x)), sum(abs.(x)) / prod(size(x))
 end
 
 
 function test_hybrid_V2S_map(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    th::Matrix{Float64},
-    v::Matrix{Float64},
-    pref::Matrix{Float64},
-    qref::Matrix{Float64},
+    gm::GridModel,
+    data::SystemData,
     yref::Vector{ComplexF64},
     ysh_ref::Vector{ComplexF64},
     mat::Matrices,
     id::Indices,
     nn::Flux.Chain,
 )
-    error, max_x, avg_x = test_hybrid_V2S_map(beta, gamma, bsh, gsh, th, v, pref, qref,
-        mat, id, nn)
+    error, max_x, avg_x = test_hybrid_V2S_map(gm, data, mat, id, nn)
     dy = compare_params_2_admittance(beta, gamma, bsh, gsh, imag(yref),
         real(yref), imag(ysh_ref), real(ysh_ref), mat)
     return error, max_x, avg_x, dy
 end
 
 
-function save_hybrid_model(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
-    bsh::Vector{Float64},
-    gsh::Vector{Float64},
-    epsilon::Matrix{Int64},
-    nn, # a Flux neural network (i.e. Chain)
+function save_grid_model(
+    gm::GridModel,
     rootname::String,
 )
     if(isfile(rootname * ".h5"))
         HDF5.h5open(rootname * ".h5","w") do fid
-            fid["/beta"] = beta
-            fid["/gamma"] = gamma
-            fid["/bsh"] = bsh
-            fid["/gsh"] = gsh
-            fid["/epsilon"] = epsilon
+            fid["/beta"] = gm.beta
+            fid["/gamma"] = gm.gamma
+            fid["/bsh"] = gm.bsh
+            fid["/gsh"] = gm.gsh
+            fid["/epsilon"] = gm.epsilon
             close(fid)
         end
     else
-        h5write(rootname * ".h5", "/beta", beta)
-        h5write(rootname * ".h5", "/gamma", gamma)
-        h5write(rootname * ".h5", "/bsh", bsh)
-        h5write(rootname * ".h5", "/gsh", gsh)
-        h5write(rootname * ".h5", "/epsilon", epsilon)
+        h5write(rootname * ".h5", "/beta", gm.beta)
+        h5write(rootname * ".h5", "/gamma", gm.gamma)
+        h5write(rootname * ".h5", "/bsh", gm.bsh)
+        h5write(rootname * ".h5", "/gsh", gm.gsh)
+        h5write(rootname * ".h5", "/epsilon", gm.epsilon)
     end
+    return nothing
+end
+
+
+function save_hybrid_model(
+    gm::GridModel,
+    nn, # a Flux neural network (i.e. Chain)
+    rootname::String,
+)
+    save_grid_model(gm)  
     @save rootname * ".bson" nn
     return nothing
 end
 
 
-function load_hybrid_model(
+function load_grid_model(
     rootname::String,
 )
     param = h5read(rootname * ".h5","/")
@@ -255,10 +235,18 @@ function load_hybrid_model(
     bsh = param["bsh"]
     gsh = param["gsh"]
     epsilon = Int64.(param["epsilon"])
-    @load rootname * ".bson" nn
     id = create_indices(1, collect(1:maximum(epsilon)),
         maximum(epsilon), epsilon) # dummy way to do so as we mostly want epsilon
     mat = create_incidence_matrices(id)
+    return beta, gamma, bsh, gsh, mat, id
+end
+
+
+function load_hybrid_model(
+    rootname::String,
+)
+    beta, gamma, bsh, gsh, mat, id = load_grid_model(rootname)
+    @load rootname * ".bson" nn
     return beta, gamma, bsh, gsh, mat, id, nn
 end
 
@@ -267,6 +255,11 @@ function create_simple_full_nn(
     N::Int64;
     act_fun = tanh
 )
-    return c = Chain(Dense(2*N,2*Ntanh,act_fun), Dense(2*N,2*N, act_fun),
-        Dense(2*N,2*N,act_fun), Dense(2*N,2*N))
+    return c = Chain(
+        Dense(2*N, 2*N, act_fun),
+        Dense(2*N, 2*N, act_fun),
+        Dense(2*N, 2*N, act_fun),
+        Dense(2*N, 2*N, act_fun),
+        Dense(2*N, 2*N)
+        )
 end

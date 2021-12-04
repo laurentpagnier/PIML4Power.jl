@@ -6,6 +6,9 @@ function kron_reduction(
     nobs::Vector{Int64};
     alpha::Float64 = 1E-1,
 )
+    # stardard way to get a reduced equivalent model, see
+    # J. Grainger & W. Stevenson, "Power System Analysis", 1994
+    # or google "Kron reduction" 
     Nobs = length(obs)
     Nnobs = length(nobs)
     Y11 = Y[obs, obs]
@@ -44,6 +47,9 @@ function contribution_of_nobs_buses(
     p::Matrix{Float64},
     q::Matrix{Float64},
 )
+    # this function gives the contribution of non-observersed (i.e. reduced)
+    # buses to the effective power injections in the Kron-reduced equivalent
+    # network. It is what the NN should learn in our hybrid scheme.
     Nobs = length(obs)
     Nnobs = length(nobs)
     Y12 = Y[obs, nobs]
@@ -65,7 +71,6 @@ function build_admittance_matrix(
 )
     Nline = size(epsilon,1)
     Nbus = maximum(epsilon)
-    println([Nline Nbus])
     Bm = sparse([epsilon[:,1]; epsilon[:,2]], [1:Nline; 1:Nline],
         [-ones(Nline); ones(Nline)], Nbus, Nline)
     return Bm * sparse(1:Nline, 1:Nline, g+im*b) * Bm' + 

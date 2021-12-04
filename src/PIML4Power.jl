@@ -45,6 +45,14 @@ struct Indices
     epsilon::Matrix{Int64}
 end
 
+mutable struct GridModel
+    epsilon::Matrix{Int64}
+    beta::Vector{Float64}
+    gamma::Vector{Float64}
+    bsh::Vector{Float64}
+    gsh::Vector{Float64}
+end
+
 
 struct SystemData
     v::Matrix{Float64}

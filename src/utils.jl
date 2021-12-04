@@ -1,4 +1,4 @@
-export load_data, generate_full_line_list, generate_neighbour_list
+export load_data, generate_full_line_list, generate_neighbour_list, create_gridmodel
 
 function create_indices(slack::Int64, id_pv::Vector{Int64}, Nbus::Int64, epsilon::Matrix{Int64})
     ns = setdiff(collect(1:Nbus), slack) # indices of non-slack buses
@@ -16,6 +16,17 @@ function save_grid_params(filename::String)
     h5write(filename, "/bsh", bsh)
     h5write(filename, "/gsh", gsh)
     h5write(filename, "/epsilon", epsilon)
+end
+
+
+function create_gridmodel(
+    epsilon::Matrix{Int64},
+    beta::Vector{Float64},
+    gamma::Vector{Float64},
+    bsh::Vector{Float64},
+    gsh::Vector{Float64},
+)
+    return GridModel(epsilon, beta, gamma, bsh, gsh)
 end
 
 
@@ -123,10 +134,10 @@ function generate_neighbour_list(
         L *= L0
     end
     
+    # non-zero elements of L indicate the neighbours
     id1 = Array{Int64}([])
     id2 = Array{Int64}([])
     for i = 1:length(L.colptr)-1
-        println(i)
         ids = L.rowval[L.colptr[i]:L.colptr[i+1]-1]
         for j = 1:length(ids)
             if(ids[j] > i)
@@ -150,6 +161,8 @@ function compare_params_2_admittance(
     gsh_ref::Vector{Float64},
     mat::Matrices,
 )
+    # this function can only be used if the grid structure is the same
+    # as in the reference case
     g = exp.(gamma)
     b = -exp.(beta)
     y = g + im * b
@@ -162,6 +175,7 @@ function compare_params_2_admittance(
     Bsh_ref = mat.Bp * b_ref + bsh_ref
     ysh_ref = Gsh_ref + im * Bsh_ref
     dysh = ysh - ysh_ref
+    # return the Frobenius norm
     return sqrt(2 * sum(abs2, dy) + sum(abs2, dysh))
 end
 
@@ -177,6 +191,6 @@ function compare_params_2_admittance(
     g = exp.(gamma)
     b = -exp.(beta)
     Y = build_admittance_matrix(b, g, bsh, gsh, epsilon)
-    
+    # return the Frobenius norm
     return norm(Y - Yref)
 end
