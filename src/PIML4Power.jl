@@ -36,6 +36,7 @@ struct Matrices
     Ipq::SparseMatrixCSC{Float64, Int64}
 end
 
+
 struct Indices
     slack::Int64
     pv::Vector{Int64}
@@ -44,6 +45,7 @@ struct Indices
     Nbus::Int64
     epsilon::Matrix{Int64}
 end
+
 
 mutable struct GridModel
     epsilon::Matrix{Int64}

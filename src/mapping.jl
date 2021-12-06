@@ -53,6 +53,7 @@ function train_V2S_map!(
     Nbatch = size(id_batch, 2)    
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th[:,id_batch], data.v[:,id_batch], mat, id)
     ps = params(gm.beta, gm.gamma, gm.bsh, gm.gsh)
+    log = zeros(0,3)
     for e in 1:Nepoch
         gs = gradient(ps) do
             b = -exp.(gm.beta)
@@ -67,14 +68,15 @@ function train_V2S_map!(
             b = -exp.(gm.beta)
             g = exp.(gm.gamma)
             p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
-            error = (sum(abs, p - data.p[:,id_batch]) + sum(abs, q - data.q[:,id_batch])) / 2.0 /
+            loss = (sum(abs, p - data.p[:,id_batch]) + sum(abs, q - data.q[:,id_batch])) / 2.0 /
                 Nbatch / id.Nbus
             dy = compare_params_2_admittance(gm.beta, gm.gamma, gm.bsh, gm.gsh,
                 data.b, data.g, data.bsh, data.gsh, mat)
-            println([e error dy])
+            println([e loss dy])
+            log = vcat(log, [e loss dy])
         end
     end  
-    return nothing
+    return log
 end
 
 
@@ -123,6 +125,8 @@ function train_hybrid_V2S_map!(
     ps = params(nn, gm.beta, gm.gamma, gm.bsh, gm.gsh)
     nbias = prod(size(nn[end].bias))
     nw = prod(size(nn[end].weight))
+    log = zeros(0,5)
+    
     for e in 1:Nepoch
         gs = gradient(ps) do
             b = -exp.(gm.beta)
@@ -144,15 +148,16 @@ function train_hybrid_V2S_map!(
             g = exp.(gm.gamma)
             p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
             x = nn([data.v[:,id_batch]; data.th[:,id_batch]])
-            error = (sum(abs, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
+            loss = (sum(abs, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
                 sum(abs, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) / 2.0 /
                 Nbatch / id.Nbus
             dy = compare_params_2_admittance(gm.beta, gm.gamma, gm.bsh, gm.gsh,
                 data.b, data.g, data.bsh, data.gsh, mat)
-            println([e error maximum(abs.(x)) sum(abs.(x)) / prod(size(x)) dy])
+            println([e loss maximum(abs.(x)) sum(abs.(x)) / prod(size(x)) dy])
+            log = vcat(log, [e loss maximum(abs.(x)) sum(abs.(x)) / prod(size(x)) dy])
         end
     end  
-    return nothing
+    return log
 end
 
 
@@ -195,21 +200,13 @@ function save_grid_model(
     gm::GridModel,
     rootname::String,
 )
-    if(isfile(rootname * ".h5"))
-        HDF5.h5open(rootname * ".h5","w") do fid
-            fid["/beta"] = gm.beta
-            fid["/gamma"] = gm.gamma
-            fid["/bsh"] = gm.bsh
-            fid["/gsh"] = gm.gsh
-            fid["/epsilon"] = gm.epsilon
-            close(fid)
-        end
-    else
-        h5write(rootname * ".h5", "/beta", gm.beta)
-        h5write(rootname * ".h5", "/gamma", gm.gamma)
-        h5write(rootname * ".h5", "/bsh", gm.bsh)
-        h5write(rootname * ".h5", "/gsh", gm.gsh)
-        h5write(rootname * ".h5", "/epsilon", gm.epsilon)
+    HDF5.h5open(rootname * ".h5","w") do fid
+        fid["/beta"] = gm.beta
+        fid["/gamma"] = gm.gamma
+        fid["/bsh"] = gm.bsh
+        fid["/gsh"] = gm.gsh
+        fid["/epsilon"] = gm.epsilon
+        close(fid)
     end
     return nothing
 end
@@ -220,7 +217,7 @@ function save_hybrid_model(
     nn, # a Flux neural network (i.e. Chain)
     rootname::String,
 )
-    save_grid_model(gm)  
+    save_grid_model(gm, rootname)  
     @save rootname * ".bson" nn
     return nothing
 end
@@ -238,7 +235,7 @@ function load_grid_model(
     id = create_indices(1, collect(1:maximum(epsilon)),
         maximum(epsilon), epsilon) # dummy way to do so as we mostly want epsilon
     mat = create_incidence_matrices(id)
-    return beta, gamma, bsh, gsh, mat, id
+    return create_gridmodel(id.epsilon, beta, gamma, bsh, gsh)
 end
 
 
