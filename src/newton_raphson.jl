@@ -8,7 +8,9 @@ function batch_with_v2p_train!(
     mat::Matrices,
     id::Indices,
     id_batch::Vector{Int64},
-    opt;
+    opt,
+    param_fun,
+    parameters...;
     Niter::Int64 = 3,
     Ninter::Int64 = 10,
     Nepoch::Int64 = 10,
@@ -22,9 +24,7 @@ function batch_with_v2p_train!(
         v = zeros(id.Nbus, Nbatch)
         th = zeros(id.Nbus, Nbatch)
         for i in 1:Nbatch
-            b = -exp.(gm.beta)
-            g = exp.(gm.gamma)
-                
+            b, g, bsh, gsh = param_fun(parameters)
             th_i, v_i = newton_raphson_scheme(b, g, gm.bsh, gm.gsh,
                 data.p[id.ns,i], data.q[id.pq,i], data.v[id.pv,i],
                 data.th[id.slack,i], mat, id, Niter = Niter,
@@ -72,12 +72,13 @@ end
 
 
 function batch_pq_based_train!(
-    gm::GridModel,
     data::SystemData,
     mat::Matrices,
     id::Indices,
     id_batch::Vector{Int64},
-    opt;
+    opt,
+    param_fun,
+    parameters...;
     Niter::Int64 = 3,
     Ninter::Int64 = 10,
     Nepoch::Int64 = 10,
@@ -85,7 +86,7 @@ function batch_pq_based_train!(
     p_max::Float64 = 8.0,
 )
     Nbatch = length(id_batch)
-    ps = params(gm.beta, gm.gamma, gm.bsh, gm.gsh)
+    ps = params(parameters)
 
     for e = 1:Nepoch
         grads = IdDict()
@@ -96,14 +97,13 @@ function batch_pq_based_train!(
         gs = Zygote.Grads(grads, ps)
         Threads.@threads for i in 1:Nbatch
             gs .+= gradient(ps) do
-                b = -exp.(gm.beta)
-                g = exp.(gm.gamma)
-                th, v = newton_raphson_scheme(b, g, gm.bsh, gm.gsh,
+                b, g, bsh, gsh = param_fun(parameters)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh,
                     data.p[id.ns,i], data.q[id.pq,i], data.v[id.pv,i],
                     data.th[id.slack,i], mat, id, Niter = Niter,
                     const_jac = const_jac)
                     
-                p_est, q_est = v2s_map(b, g, gm.bsh, gm.gsh, v, th, mat, id)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
                 
                 return sum(abs, p_est[id.slack] - data.p[id.slack,i]) + sum(abs, q_est[id.pv] - data.q[id.pv,i])
                     + sum(abs, th[id.ns] - data.th[id.ns,i]) + sum(abs, v[id.pq] - data.v[id.pq,i])
@@ -115,19 +115,17 @@ function batch_pq_based_train!(
         if(mod(e, Ninter) == 0)
             loss_vth = 0
             loss_pq = 0
+            b, g, bsh, gsh = param_fun(parameters)
             for i in 1:Nbatch
-                b = -exp.(gm.beta)
-                g = exp.(gm.gamma)
-                
-                th, v = newton_raphson_scheme(b, g, gm.bsh, gm.gsh, data.p[id.ns,i],
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, data.p[id.ns,i],
                     data.q[id.pq,i], data.v[id.pv,i], data.th[id.slack,i],
                     mat, id, Niter = Niter, const_jac = const_jac)
-                p_est, q_est = v2s_map(b, g, gm.bsh, gm.gsh, v, th, mat, id)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
                 
                 loss_vth += sum(abs, th[id.ns] - data.th[id.ns,i]) + sum(abs, v[id.pq] - data.v[id.pq,i])
                 loss_pq += sum(abs, p_est[id.slack] - data.p[id.slack,i]) + sum(abs, q_est[id.pv] - data.q[id.pv,i])
             end
-            dy = compare_params_2_admittance(gm.beta, gm.gamma, gm.bsh, gm.gsh,
+            dy = compare_params_2_admittance(b, g, bsh, gsh,
                 data.b, data.g, data.bsh, data.gsh, mat)
             println([e, loss_vth, loss_pq, dy])
         end

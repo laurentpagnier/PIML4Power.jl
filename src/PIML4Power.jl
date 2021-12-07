@@ -49,10 +49,18 @@ end
 
 mutable struct GridModel
     epsilon::Matrix{Int64}
-    beta::Vector{Float64}
-    gamma::Vector{Float64}
+    b::Vector{Float64}
+    g::Vector{Float64}
     bsh::Vector{Float64}
     gsh::Vector{Float64}
+end
+
+
+struct Observation
+    v::Matrix{Float64}
+    th::Matrix{Float64}
+    p::Matrix{Float64}
+    q::Matrix{Float64}
 end
 
 
@@ -61,18 +69,19 @@ struct SystemData
     th::Matrix{Float64}
     p::Matrix{Float64}
     q::Matrix{Float64}
-    epsilon::Matrix{Int64}
+    gm::Matrix{Int64}
     b::Vector{Float64}
     g::Vector{Float64}
     bsh::Vector{Float64}
     gsh::Vector{Float64}
 end
 
-
-include("utils.jl")
-include("newton_raphson.jl")
 include("kron_reduction.jl")
 include("mapping.jl")
+include("newton_raphson.jl")
+include("params.jl")
+include("utils.jl")
+
 end
 
 

@@ -151,8 +151,8 @@ end
 
 
 function compare_params_2_admittance(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
+    b::Vector{Float64},
+    g::Vector{Float64},
     bsh::Vector{Float64},
     gsh::Vector{Float64},
     b_ref::Vector{Float64},
@@ -163,8 +163,6 @@ function compare_params_2_admittance(
 )
     # this function can only be used if the grid structure is the same
     # as in the reference case
-    g = exp.(gamma)
-    b = -exp.(beta)
     y = g + im * b
     y_ref = g_ref + im * b_ref 
     dy = y - y_ref
@@ -194,3 +192,71 @@ function compare_params_2_admittance(
     # return the Frobenius norm
     return norm(Y - Yref)
 end
+
+
+
+function save_grid_model(
+    gm::GridModel,
+    rootname::String,
+)
+    HDF5.h5open(rootname * ".h5","w") do fid
+        fid["/beta"] = gm.beta
+        fid["/gamma"] = gm.gamma
+        fid["/bsh"] = gm.bsh
+        fid["/gsh"] = gm.gsh
+        fid["/epsilon"] = gm.epsilon
+        close(fid)
+    end
+    return nothing
+end
+
+
+function save_hybrid_model(
+    gm::GridModel,
+    nn, # a Flux neural network (i.e. Chain)
+    rootname::String,
+)
+    save_grid_model(gm, rootname)  
+    @save rootname * ".bson" nn
+    return nothing
+end
+
+
+function load_grid_model(
+    rootname::String,
+)
+    param = h5read(rootname * ".h5","/")
+    beta = param["beta"]
+    gamma = param["gamma"]
+    bsh = param["bsh"]
+    gsh = param["gsh"]
+    epsilon = Int64.(param["epsilon"])
+    id = create_indices(1, collect(1:maximum(epsilon)),
+        maximum(epsilon), epsilon) # dummy way to do so as we mostly want epsilon
+    mat = create_incidence_matrices(id)
+    return create_gridmodel(id.epsilon, beta, gamma, bsh, gsh)
+end
+
+
+function load_hybrid_model(
+    rootname::String,
+)
+    beta, gamma, bsh, gsh, mat, id = load_grid_model(rootname)
+    @load rootname * ".bson" nn
+    return beta, gamma, bsh, gsh, mat, id, nn
+end
+
+
+function create_simple_full_nn(
+    N::Int64;
+    act_fun = tanh
+)
+    return c = Chain(
+        Dense(2*N, 2*N, act_fun),
+        Dense(2*N, 2*N, act_fun),
+        Dense(2*N, 2*N, act_fun),
+        Dense(2*N, 2*N, act_fun),
+        Dense(2*N, 2*N)
+        )
+end
+
