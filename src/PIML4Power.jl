@@ -69,7 +69,7 @@ struct SystemData
     th::Matrix{Float64}
     p::Matrix{Float64}
     q::Matrix{Float64}
-    gm::Matrix{Int64}
+    epsilon::Matrix{Int64}
     b::Vector{Float64}
     g::Vector{Float64}
     bsh::Vector{Float64}

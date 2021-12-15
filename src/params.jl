@@ -29,3 +29,13 @@ function exp_param(
     g = exp.(p[2])
     return b, g, p[3], p[4]
 end
+
+# reduction param functions provide the rule that should be applied to
+# parameters if the list of edges is reduced
+
+function red_param(
+    p::NTuple{4, Vector{Float64}},
+    iskept::BitVector,
+)
+    return NTuple{4, Vector{Float64}}((p[1][iskept], p[2][iskept], p[3], p[4]))
+end
