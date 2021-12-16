@@ -91,7 +91,7 @@ function train_n_update_V2S_map!(
     id_batch::Vector{Int64},
     opt,
     param_fun,
-    red_param_fun,
+    red_param_fun, # see "params.jl" for more info on its role 
     parameters...;
     tol::Float64 = 0.01,
     Ninter::Int64 = 5,
@@ -99,31 +99,30 @@ function train_n_update_V2S_map!(
     Nsubepoch::Int64 = 200,
     b_thres::Float64 = 0.05,
 )
-    Nbatch = size(id_batch, 2)
+    param = parameters
+    eps = epsilon
     id = create_indices(1, collect(1:id.Nbus), id.Nbus, epsilon)
     mat = create_incidence_matrices(id)
     for e in 1:Nepoch
-        train_V2S_map!(data, mat, id, collect(1:Nbatch), opt, param_fun,
-            parameters..., Ninter = Ninter, Nepoch = Nsubepoch)
-        # re-evaluate the structure of the grid
-        b, _, _, _ = param_fun(parameters)
+        train_V2S_map!(data, mat, id, id_batch, opt, param_fun,
+            param..., Ninter = Ninter, Nepoch = Nsubepoch)
+            
+        # re-evaluate the structure of the grid (i.e. if the susceptance
+        # is smaller than a threshold, one assumes that there is no line)
+        b, _, _, _ = param_fun(param)
         is_kept = abs.(b) .> b_thres
-        if(sum(.!is_kept) > 0)
-            #parameters = red_param_fun(parameters, is_kept)
-            epsilon = epsilon[is_kept,:]
-            Nline = size(epsilon, 1)
-            gamma = 2 * ones(Nline)
-            beta = 4 * ones(Nline)
-            gsh = 1E-1 * ones(id.Nbus)
-            bsh = 1E-1 * ones(id.Nbus)
-            parameters = NTuple{4, Vector{Float64}}((beta,gamma,bsh,gsh))
-            id = create_indices(1, collect(1:id.Nbus), id.Nbus, epsilon)
+        
+        # if there if any change, apply them
+        if(sum(.!is_kept) > 0 & e != Nepoch)
+            param = red_param_fun(param, is_kept)
+            eps = eps[is_kept,:]
+            id = create_indices(1, collect(1:id.Nbus), id.Nbus, eps)
             mat = create_incidence_matrices(id)
         end
         println([e, sum(is_kept), maximum(b), length(b)])
     end
-    
-    return epsilon, parameters...
+
+    return eps, param...
 end
 
 
