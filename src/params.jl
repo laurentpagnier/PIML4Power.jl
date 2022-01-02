@@ -21,6 +21,23 @@ function rx_param(
     return b, g, p[3], p[4]
 end
 
+function rx_phys_legit_param(
+    p::NTuple{4, Vector{Float64}}
+)
+    #b = min.(-p[2] ./ (p[1].^2 + p[2].^2), -1E-3)
+    #g = max.(p[1] ./ (p[1].^2 + p[2].^2), 1E-3)
+    b = -abs.(p[2] ./ (p[1].^2 + p[2].^2))
+    g = abs.(p[1] ./ (p[1].^2 + p[2].^2))
+    return b, g, p[3], p[4]
+end
+
+function bg_phys_legit_param(
+    p::NTuple{4, Vector{Float64}}
+)
+    b = -abs.(p[1])
+    g = abs.(p[2])
+    return b, g, p[3], p[4]
+end
 
 function exp_param(
     p::NTuple{4, Vector{Float64}}

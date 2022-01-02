@@ -76,3 +76,67 @@ function build_admittance_matrix(
     return Bm * sparse(1:Nline, 1:Nline, g+im*b) * Bm' + 
         sparse(1:Nbus, 1:Nbus, gsh+im*bsh)
 end
+
+
+function compute_power_flows(
+    b::Vector{Float64},
+    g::Vector{Float64},
+    th::Matrix{Float64},
+    v::Matrix{Float64},
+    mat::Matrices,
+)
+    Nbatch = size(th,2)
+    Nline = size(mat.Bin,2)
+    pij = zeros(Nline,Nbatch)
+    qij = zeros(Nline,Nbatch)
+    pji = zeros(Nline,Nbatch)
+    qji = zeros(Nline,Nbatch)
+    
+    Threads.@threads for i=1:Nbatch
+        a, b, c, d = compute_power_flows(b, g, th[:,i], v[:,i], mat)
+        pij[:,i] = a
+        qij[:,i] = b
+        pji[:,i] = c
+        qji[:,i] = d
+    end
+        
+    return pij, qij, pji, qji
+end
+
+
+function compute_power_flows(
+    b::Vector{Float64},
+    g::Vector{Float64},
+    th::Vector{Float64},
+    v::Vector{Float64},
+    mat::Matrices,
+)
+    dth = mat.Bmt * th;
+    costh = cos.(dth)
+    sinth = sin.(dth)
+
+    pij = g .* ((mat.Bint * v).^2 - (mat.Bint * v) .* (mat.Boutt * v) .* costh) -
+        b .* (mat.Bint * v) .* (mat.Boutt * v) .* sinth
+    qij = b .* (-(mat.Bint * v).^2 + (mat.Bint * v) .* (mat.Boutt * v) .* costh) -
+        g .* (mat.Bint * v) .* (mat.Boutt * v) .* sinth
+    pji = g .* ((mat.Boutt * v).^2 - (mat.Bint * v) .* (mat.Boutt * v) .* costh) +
+        b .* (mat.Bint * v) .* (mat.Boutt * v) .* sinth
+    qji = b .* (-(mat.Boutt * v).^2 + (mat.Bint * v) .* (mat.Boutt * v) .* costh) +
+        g .* (mat.Bint * v) .* (mat.Boutt * v) .* sinth
+        
+    return pij, qij, pji, qji
+end
+
+
+function build_PTDF_matrix(b::Vector{Float64}, mat::Matrices)
+    # shunt suscpetances are neglected
+    # define the susceptance matrix
+    B = mat.Bm * (b .* mat.Bmt) # should be -b 
+    # compute its pseudo-inverse
+    eigs = eigen(Matrix{Float64}(L))
+    v = eigs.values
+    v[1:end-1] .= 1 ./ v[1:end-1]
+    Bt = eigs.vectors * (eigs.values .* eigs.vectors')
+    # return the pdtf mat
+    return b .* mat.Bmt * Bt * v # should be -b be cancel out with the previous one
+end

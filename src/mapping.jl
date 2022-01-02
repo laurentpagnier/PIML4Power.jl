@@ -56,7 +56,9 @@ function train_V2S_map!(
         data.v[:,id_batch], mat, id)
     ps = params(parameters)
     
-    logs = zeros(0,3)
+    logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
+        "loss" => Vector{Float64}([]),
+        "dy" => Vector{Float64}([]))
     for e in 1:Nepoch
         gs = gradient(ps) do
             b, g, bsh, gsh = param_fun(parameters)
@@ -73,11 +75,13 @@ function train_V2S_map!(
             loss = (sum(abs, p - data.p[:,id_batch]) +
                 sum(abs, q - data.q[:,id_batch])) / 2.0 /
                 Nbatch / id.Nbus
-            #dy = compare_params_2_admittance(b, g, bsh, gsh,
-            #    data.b, data.g, data.bsh, data.gsh, mat)
-            dy = 0
+            dy = compare_params_2_admittance(b, g, bsh, gsh,
+                data.b, data.g, data.bsh, data.gsh, mat)
+            #dy = 0
             println([e loss dy])
-            logs = vcat(logs, [e loss dy])
+            append!(logs["epochs"], e)
+            append!(logs["loss"], loss)
+            append!(logs["dy"], dy)
         end
     end  
     return logs

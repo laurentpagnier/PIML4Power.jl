@@ -1,3 +1,92 @@
+
+        #=
+        Threads.@threads for i in 1:Nbatch
+            gs = gradient(ps) do
+                b, g, bsh, gsh = param_fun(parameters)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh,
+                    data.p[id.ns,i], data.q[id.pq,i], data.v[id.pv,i],
+                    data.th[id.slack,i], mat, id, Niter = Niter,
+                    const_jac = const_jac)
+                    
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+                
+                return sum(abs, p_est[id.slack] - data.p[id.slack,i]) + sum(abs, q_est[id.pv] - data.q[id.pv,i])
+                    + sum(abs, th[id.ns] - data.th[id.ns,i]) + sum(abs, v[id.pq] - data.v[id.pq,i])
+            end
+            Flux.update!(opt, ps, gs)
+        end
+        =#
+
+function batch_with_v2p_train!(
+    gm::GridModel,
+    data::SystemData,
+    mat::Matrices,
+    id::Indices,
+    id_batch::Vector{Int64},
+    opt,
+    param_fun,
+    parameters...;
+    Niter::Int64 = 3,
+    Ninter::Int64 = 10,
+    Nepoch::Int64 = 10,
+    const_jac::Bool = false,
+    Nstep::Int64 = 100,
+)
+    Nbatch = length(id_batch)
+    ps = params(gm.beta, gm.gamma, gm.bsh, gm.gsh)
+    for e = 1:Nepoch
+    
+        v = zeros(id.Nbus, Nbatch)
+        th = zeros(id.Nbus, Nbatch)
+        for i in 1:Nbatch
+            b, g, bsh, gsh = param_fun(parameters)
+            th_i, v_i = newton_raphson_scheme(b, g, gm.bsh, gm.gsh,
+                data.p[id.ns,i], data.q[id.pq,i], data.v[id.pv,i],
+                data.th[id.slack,i], mat, id, Niter = Niter,
+                const_jac = const_jac)
+            
+            th[:,i] = th_i
+            v[:,i] = v_i
+        end
+        
+        # V2S map
+        Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
+        for _ in 1:Nstep
+            gs = gradient(ps) do
+                b = -exp.(gm.beta)
+                g = exp.(gm.gamma)
+                p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
+                return sum(abs, p[id.slack,:] - data.p[id.slack,id_batch]) +
+                    sum(abs, q[id.pv, :] - data.q[id.pv, id_batch])
+            end
+            Flux.update!(opt, ps, gs)
+        end 
+        
+        if(mod(e, Ninter) == 0)
+            loss_vth = 0
+            loss_pq = 0
+            for i in 1:Nbatch
+                b = -exp.(gm.beta)
+                g = exp.(gm.gamma)
+                
+                th, v = newton_raphson_scheme(b, g, gm.bsh, gm.gsh, data.p[id.ns,i],
+                    data.q[id.pq,i], data.v[id.pv,i], data.th[id.slack,i],
+                    mat, id, Niter = Niter, const_jac = const_jac)
+                p_est, q_est = v2s_map(b, g, gm.bsh, gm.gsh, v, th, mat, id)
+                
+                loss_vth += sum(abs, th[id.ns] - data.th[id.ns,i]) + sum(abs, v[id.pq] - data.v[id.pq,i])
+                loss_pq += sum(abs, p_est[id.slack] - data.p[id.slack,i]) + sum(abs, q_est[id.pv] - data.q[id.pv,i])
+            end
+            dy = compare_params_2_admittance(gm.beta, gm.gamma, gm.bsh, gm.gsh,
+                data.b, data.g, data.bsh, data.gsh, mat)
+            println([e, loss_vth, loss_pq, dy])
+        end
+    end
+    return nothing
+end
+
+
+
 #=
 function full_obs_missmatch(
     beta::Vector{Float64},

@@ -76,6 +76,7 @@ struct SystemData
     gsh::Vector{Float64}
 end
 
+include("agnostic.jl")
 include("kron_reduction.jl")
 include("mapping.jl")
 include("newton_raphson.jl")

@@ -2,8 +2,7 @@ export newton_raphson_scheme, v2s_map, batch_train!
 
 using Zygote
 
-function batch_with_v2p_train!(
-    gm::GridModel,
+function batch_train_with_pmus!(
     data::SystemData,
     mat::Matrices,
     id::Indices,
@@ -15,63 +14,76 @@ function batch_with_v2p_train!(
     Ninter::Int64 = 10,
     Nepoch::Int64 = 10,
     const_jac::Bool = false,
-    Nstep::Int64 = 100,
+    p_max::Float64 = 8.0,
 )
     Nbatch = length(id_batch)
-    ps = params(gm.beta, gm.gamma, gm.bsh, gm.gsh)
-    for e = 1:Nepoch
+    ps = params(parameters)
     
-        v = zeros(id.Nbus, Nbatch)
-        th = zeros(id.Nbus, Nbatch)
-        for i in 1:Nbatch
-            b, g, bsh, gsh = param_fun(parameters)
-            th_i, v_i = newton_raphson_scheme(b, g, gm.bsh, gm.gsh,
-                data.p[id.ns,i], data.q[id.pq,i], data.v[id.pv,i],
-                data.th[id.slack,i], mat, id, Niter = Niter,
-                const_jac = const_jac)
-            
-            th[:,i] = th_i
-            v[:,i] = v_i
+    # here we will also treat PV buses as PQ buses
+    id_temp = create_indices(id.slack, [id.slack], id.Nbus, id.epsilon)
+    #println(id_temp.pq)
+    mat_temp = create_incidence_matrices(id_temp)
+    logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
+        "loss" => Vector{Float64}([]),
+        "dy" => Vector{Float64}([]))
+    for e = 1:Nepoch
+        
+        grads = IdDict()
+        grads[ps[2]] = zeros(size(ps[2]))
+        grads[ps[4]] = zeros(size(ps[4]))
+        grads[ps[1]] = zeros(size(ps[1]))
+        grads[ps[3]] = zeros(size(ps[3]))
+        gs = Zygote.Grads(grads, ps)
+        Threads.@threads for i in id_batch
+            gs .+= gradient(ps) do
+                b, g, bsh, gsh = param_fun(parameters)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh,
+                    data.p[id_temp.ns,i], data.q[id_temp.pq,i], data.v[id_temp.pv,i],
+                    data.th[id_temp.slack,i], mat_temp, id_temp, Niter = Niter,
+                    const_jac = const_jac)
+                    
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat_temp, id_temp)
+                
+                return sum(abs, v[id.pv] - data.v[id.pv,i]) / length(id.pv) / 0.1 +
+                    sum(abs, th[id.pv] - data.th[id.pv,i]) / length(id.pv) / 0.52 + # 0.52 approx 30deg
+                    sum(abs, q_est - data.q[:,i]) / id.Nbus / maximum(data.p) +
+                    sum(abs, p_est - data.p[:,i]) / id.Nbus / maximum(data.p) 
+            end
         end
         
-        # V2S map
-        Vij, V2cos, V2sin, Vii = preproc_V2S_map(th, v, mat, id)
-        for _ in 1:Nstep
-            gs = gradient(ps) do
-                b = -exp.(gm.beta)
-                g = exp.(gm.gamma)
-                p, q = V2S_map(b, g, gm.bsh, gm.gsh, V2cos, V2sin, Vii, mat)
-                return sum(abs, p[id.slack,:] - data.p[id.slack,id_batch]) +
-                    sum(abs, q[id.pv, :] - data.q[id.pv, id_batch])
-            end
-            Flux.update!(opt, ps, gs)
-        end 
+        Flux.update!(opt, ps, gs)
         
         if(mod(e, Ninter) == 0)
-            loss_vth = 0
-            loss_pq = 0
-            for i in 1:Nbatch
-                b = -exp.(gm.beta)
-                g = exp.(gm.gamma)
-                
-                th, v = newton_raphson_scheme(b, g, gm.bsh, gm.gsh, data.p[id.ns,i],
+            loss_th = 0
+            loss_v = 0
+            loss_p = 0
+            loss_q = 0
+            b, g, bsh, gsh = param_fun(parameters)
+            Threads.@threads for i in id_batch
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, data.p[id.ns,i],
                     data.q[id.pq,i], data.v[id.pv,i], data.th[id.slack,i],
                     mat, id, Niter = Niter, const_jac = const_jac)
-                p_est, q_est = v2s_map(b, g, gm.bsh, gm.gsh, v, th, mat, id)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
                 
-                loss_vth += sum(abs, th[id.ns] - data.th[id.ns,i]) + sum(abs, v[id.pq] - data.v[id.pq,i])
-                loss_pq += sum(abs, p_est[id.slack] - data.p[id.slack,i]) + sum(abs, q_est[id.pv] - data.q[id.pv,i])
+                loss_v += sum(abs, th - data.th[:,i])
+                loss_th += sum(abs, th - data.th[:,i])
+                loss_p += sum(abs, p_est - data.p[:,i])
+                loss_q += sum(abs, q_est - data.q[:,i])
+
             end
-            dy = compare_params_2_admittance(gm.beta, gm.gamma, gm.bsh, gm.gsh,
+            dy = compare_params_2_admittance(b, g, bsh, gsh,
                 data.b, data.g, data.bsh, data.gsh, mat)
-            println([e, loss_vth, loss_pq, dy])
+            println([e, loss_th, loss_v, loss_p, loss_q, dy])
+            append!(logs["epochs"], e)
+            append!(logs["loss"], loss_th + loss_p + loss_q)
+            append!(logs["dy"], dy)
         end
     end
-    return nothing
+    return logs
 end
 
 
-function batch_pq_based_train!(
+function batch_train_pq!(
     data::SystemData,
     mat::Matrices,
     id::Indices,
@@ -88,14 +100,18 @@ function batch_pq_based_train!(
     Nbatch = length(id_batch)
     ps = params(parameters)
 
+    logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
+        "loss" => Vector{Float64}([]),
+        "dy" => Vector{Float64}([]))
     for e = 1:Nepoch
+        
         grads = IdDict()
         grads[ps[2]] = zeros(size(ps[2]))
         grads[ps[4]] = zeros(size(ps[4]))
         grads[ps[1]] = zeros(size(ps[1]))
         grads[ps[3]] = zeros(size(ps[3]))
         gs = Zygote.Grads(grads, ps)
-        Threads.@threads for i in 1:Nbatch
+        Threads.@threads for i in id_batch
             gs .+= gradient(ps) do
                 b, g, bsh, gsh = param_fun(parameters)
                 th, v = newton_raphson_scheme(b, g, bsh, gsh,
@@ -104,33 +120,190 @@ function batch_pq_based_train!(
                     const_jac = const_jac)
                     
                 p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
-                
-                return sum(abs, p_est[id.slack] - data.p[id.slack,i]) + sum(abs, q_est[id.pv] - data.q[id.pv,i])
-                    + sum(abs, th[id.ns] - data.th[id.ns,i]) + sum(abs, v[id.pq] - data.v[id.pq,i])
+                    
+                return sum(abs, p_est - data.p[:,i]) +
+                    sum(abs, q_est - data.q[:,i]) 
             end
         end
         
         Flux.update!(opt, ps, gs)
-
+        
         if(mod(e, Ninter) == 0)
-            loss_vth = 0
-            loss_pq = 0
+            loss_th = 0
+            loss_v = 0
+            loss_p = 0
+            loss_q = 0
             b, g, bsh, gsh = param_fun(parameters)
-            for i in 1:Nbatch
+            Threads.@threads for i in id_batch
                 th, v = newton_raphson_scheme(b, g, bsh, gsh, data.p[id.ns,i],
                     data.q[id.pq,i], data.v[id.pv,i], data.th[id.slack,i],
                     mat, id, Niter = Niter, const_jac = const_jac)
                 p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
-                
-                loss_vth += sum(abs, th[id.ns] - data.th[id.ns,i]) + sum(abs, v[id.pq] - data.v[id.pq,i])
-                loss_pq += sum(abs, p_est[id.slack] - data.p[id.slack,i]) + sum(abs, q_est[id.pv] - data.q[id.pv,i])
+                loss_th += sum(abs, th - data.th[:,i])
+                loss_v += sum(abs, v - data.v[:,i])
+                loss_p += sum(abs, p_est - data.p[:,i])
+                loss_q += sum(abs, q_est - data.q[:,i])
             end
             dy = compare_params_2_admittance(b, g, bsh, gsh,
                 data.b, data.g, data.bsh, data.gsh, mat)
-            println([e, loss_vth, loss_pq, dy])
+            println([e, loss_th, loss_v, loss_p, loss_q, dy])
+            append!(logs["epochs"], e)
+            append!(logs["loss"], loss_th + loss_p + loss_q)
+            append!(logs["dy"], dy)
         end
     end
-    return nothing
+    return logs
+end
+
+
+function batch_train_vth!(
+    data::SystemData,
+    mat::Matrices,
+    id::Indices,
+    id_batch::Vector{Int64},
+    opt,
+    param_fun,
+    parameters...;
+    Niter::Int64 = 3,
+    Ninter::Int64 = 10,
+    Nepoch::Int64 = 10,
+    const_jac::Bool = false,
+    p_max::Float64 = 8.0,
+)
+    Nbatch = length(id_batch)
+    ps = params(parameters)
+
+    logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
+        "loss" => Vector{Float64}([]),
+        "dy" => Vector{Float64}([]))
+    for e = 1:Nepoch
+        
+        grads = IdDict()
+        grads[ps[2]] = zeros(size(ps[2]))
+        grads[ps[4]] = zeros(size(ps[4]))
+        grads[ps[1]] = zeros(size(ps[1]))
+        grads[ps[3]] = zeros(size(ps[3]))
+        gs = Zygote.Grads(grads, ps)
+        Threads.@threads for i in id_batch
+            gs .+= gradient(ps) do
+                b, g, bsh, gsh = param_fun(parameters)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh,
+                    data.p[id.ns,i], data.q[id.pq,i], data.v[id.pv,i],
+                    data.th[id.slack,i], mat, id, Niter = Niter,
+                    const_jac = const_jac)
+                    
+                return sum(abs, th[id.ns] - data.th[id.ns,i]) / 0.52 / length(id.ns) +
+                    sum(abs, v[id.pq] - data.v[id.pq,i]) / 0.1 / length(id.pq) 
+            end
+        end
+        
+        Flux.update!(opt, ps, gs)
+        
+        if(mod(e, Ninter) == 0)
+            loss_th = 0
+            loss_v = 0
+            loss_p = 0
+            loss_q = 0
+            b, g, bsh, gsh = param_fun(parameters)
+            Threads.@threads for i in id_batch
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, data.p[id.ns,i],
+                    data.q[id.pq,i], data.v[id.pv,i], data.th[id.slack,i],
+                    mat, id, Niter = Niter, const_jac = const_jac)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+                loss_th += sum(abs, th - data.th[:,i])
+                loss_v += sum(abs, v - data.v[:,i])
+                loss_p += sum(abs, p_est - data.p[:,i])
+                loss_q += sum(abs, q_est - data.q[:,i])
+            end
+            dy = compare_params_2_admittance(b, g, bsh, gsh,
+                data.b, data.g, data.bsh, data.gsh, mat)
+            println([e, loss_th, loss_v, loss_p, loss_q, dy])
+            append!(logs["epochs"], e)
+            append!(logs["loss"], loss_th + loss_p + loss_q)
+            append!(logs["dy"], dy)
+        end
+    end
+    return logs
+end
+
+
+function batch_train!(
+    data::SystemData,
+    mat::Matrices,
+    id::Indices,
+    id_batch::Vector{Int64},
+    opt,
+    param_fun,
+    parameters...;
+    Niter::Int64 = 3,
+    Ninter::Int64 = 10,
+    Nepoch::Int64 = 10,
+    const_jac::Bool = false,
+    p_max::Float64 = 8.0,
+)
+    Nbatch = length(id_batch)
+    ps = params(parameters)
+
+    logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
+        "loss" => Vector{Float64}([]),
+        "dy" => Vector{Float64}([]))
+    for e = 1:Nepoch
+        
+        grads = IdDict()
+        grads[ps[2]] = zeros(size(ps[2]))
+        grads[ps[4]] = zeros(size(ps[4]))
+        grads[ps[1]] = zeros(size(ps[1]))
+        grads[ps[3]] = zeros(size(ps[3]))
+        gs = Zygote.Grads(grads, ps)
+        Threads.@threads for i in id_batch
+            gs .+= gradient(ps) do
+                b, g, bsh, gsh = param_fun(parameters)
+                th, v = newton_raphson_scheme(b, g, bsh, gsh,
+                    data.p[id.ns,i], data.q[id.pq,i], data.v[id.pv,i],
+                    data.th[id.slack,i], mat, id, Niter = Niter,
+                    const_jac = const_jac)
+                    
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+                #=
+                return sum(abs, p_est - data.p[:,i]) +
+                    sum(abs, q_est - data.q[:,i]) +
+                    sum(abs, th[id.pv] - data.th[id.pv,i])
+                =#
+                    
+                return sum(abs, th[id.pv] - data.th[id.pv,i]) / length(id.pv) / 0.52 +
+                    sum(abs, v[id.pv] - data.v[id.pv,i]) / length(id.pv) / 0.1 +
+                    sum(abs, p_est - data.p[:,i]) / id.Nbus / maximum(data.p) +
+                    sum(abs, q_est - data.q[:,i]) / id.Nbus / maximum(data.p) 
+            end
+        end
+        
+        Flux.update!(opt, ps, gs)
+        
+        if(mod(e, Ninter) == 0)
+            loss_th = 0
+            loss_v = 0
+            loss_p = 0
+            loss_q = 0
+            b, g, bsh, gsh = param_fun(parameters)
+            Threads.@threads for i in id_batch
+                th, v = newton_raphson_scheme(b, g, bsh, gsh, data.p[id.ns,i],
+                    data.q[id.pq,i], data.v[id.pv,i], data.th[id.slack,i],
+                    mat, id, Niter = Niter, const_jac = const_jac)
+                p_est, q_est = v2s_map(b, g, bsh, gsh, v, th, mat, id)
+                loss_th += sum(abs, th - data.th[:,i])
+                loss_v += sum(abs, v - data.v[:,i])
+                loss_p += sum(abs, p_est - data.p[:,i])
+                loss_q += sum(abs, q_est - data.q[:,i])
+            end
+            dy = compare_params_2_admittance(b, g, bsh, gsh,
+                data.b, data.g, data.bsh, data.gsh, mat)
+            println([e, loss_th, loss_v, loss_p, loss_q, dy])
+            append!(logs["epochs"], e)
+            append!(logs["loss"], loss_th + loss_p + loss_q)
+            append!(logs["dy"], dy)
+        end
+    end
+    return logs
 end
 
 
