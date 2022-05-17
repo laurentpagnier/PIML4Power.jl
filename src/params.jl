@@ -6,7 +6,7 @@
 # gsh: shunt conductances (a vector with an entry per bus)
 
 
-function trival_param(
+function trivial_param(
     p::NTuple{4, Vector{Float64}}
 )
     return p[1], p[2], p[3], p[4]
@@ -21,6 +21,7 @@ function rx_param(
     return b, g, p[3], p[4]
 end
 
+
 function rx_phys_legit_param(
     p::NTuple{4, Vector{Float64}}
 )
@@ -31,6 +32,7 @@ function rx_phys_legit_param(
     return b, g, p[3], p[4]
 end
 
+
 function bg_phys_legit_param(
     p::NTuple{4, Vector{Float64}}
 )
@@ -38,6 +40,7 @@ function bg_phys_legit_param(
     g = abs.(p[2])
     return b, g, p[3], p[4]
 end
+
 
 function exp_param(
     p::NTuple{4, Vector{Float64}}
@@ -50,9 +53,23 @@ end
 # reduction param functions provide the rule that should be applied to
 # parameters if the list of edges is reduced
 
-function red_param(
-    p::NTuple{4, Vector{Float64}},
+function red_param!(
+    p::Vector{Vector{Float64}},
     iskept::BitVector,
 )
-    return NTuple{4, Vector{Float64}}((p[1][iskept], p[2][iskept], p[3], p[4]))
+    p[1] = p[1][iskept]
+    p[2] = p[2][iskept]
+    return nothing
+end
+
+function convert_param_tuple_into_vector(p)
+    v = Vector{Vector{Float64}}([])
+    for i = 1:length(p)
+        push!(v, p[i])
+    end
+    return v
+end
+
+function convert_param_vector_into_tuple(v)
+    return Tuple(copy(v[i]) for i in 1:length(v))
 end

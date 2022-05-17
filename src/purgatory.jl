@@ -1,3 +1,71 @@
+function train_only_nn_V2S_map!(
+    data::SystemData,
+    mat::Matrices,
+    id::Indices,
+    id_batch::Vector{Int64},
+    nn::Flux.Chain,
+    opt,
+    param_fun,
+    parameters...;
+    Nepoch::Int64 = 100,
+    Ninter::Int64 = 5,
+    lambda = 1,
+)
+    Nbatch = length(id_batch)
+    Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th[:,id_batch],
+        data.v[:,id_batch], mat, id)
+    ps = params(nn)
+    nbias = prod(size(nn[end].bias))
+    nw = prod(size(nn[end].weight))
+    logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
+        "loss" => Vector{Float64}([]),
+        "dy" => Vector{Float64}([]),
+        "max_nn_contrib" => Vector{Float64}([]),
+        "avg_nn_contrib" => Vector{Float64}([]),)
+    
+    dv = data.v[:,id_batch] .- 1
+    dth = data.th[:,id_batch] .- data.th[id.slack,1]
+    
+    for e in 1:Nepoch
+        gs = gradient(ps) do
+            b, g, bsh, gsh = param_fun(parameters)
+            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+            x = nn([dv; dth])
+            ds = (sum(abs, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
+                sum(abs, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) /
+                2.0 / Nbatch / id.Nbus
+            #dw = (sum(abs, nn[end].weight) / nw +
+            #    sum(abs, nn[end].bias) / nbias)
+            #dw = (sum(abs, x[1:id.Nbus,:]) + sum(abs, x[id.Nbus+1:end,:])) /
+            #    2.0 / Nbatch / id.Nbus
+            dw = maximum(abs.(x))
+            return ds  + lambda * dw 
+        end
+        
+        Flux.update!(opt, ps, gs)
+        
+        if(mod(e, Ninter) == 0)
+            b, g, bsh, gsh = param_fun(parameters)
+            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+            x = nn([dv; dth])
+            loss = (sum(abs, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
+                sum(abs, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) / 2.0 /
+                Nbatch / id.Nbus
+            dy = compare_params_2_admittance(b, g, bsh, gsh,
+                data.b, data.g, data.bsh, data.gsh, mat)
+            println([e loss maximum(abs.(x)) sum(abs.(x)) / prod(size(x)) dy])
+            append!(logs["epochs"], e)
+            append!(logs["loss"], loss)
+            append!(logs["dy"], dy)
+            append!(logs["max_nn_contrib"], maximum(abs.(x)))
+            append!(logs["avg_nn_contrib"], sum(abs.(x)) / prod(size(x)))
+            #logs = vcat(logs, [e loss maximum(abs.(x)) sum(abs.(x)) / prod(size(x)) dy])
+        end
+    end  
+    return logs
+end
+
+
 
         #=
         Threads.@threads for i in 1:Nbatch

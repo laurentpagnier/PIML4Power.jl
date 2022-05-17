@@ -32,23 +32,22 @@ end
 
 function load_data(filename::String)
     data = h5read(filename, "/")
-    vref = data["V"]
-    thref = data["theta"]
-    pref = data["P"]
-    qref = data["Q"]
+    v = Float64.(data["V"])
+    th = Float64.(data["theta"])
+    p = Float64.(data["P"])
+    q = Float64.(data["Q"])
     epsilon = Int64.(data["epsilon"])
-    g_ref = vec(data["g"])
-    obs = vec(Int64.(data["idgen"]))
-    nobs = setdiff(1:maximum(epsilon), obs)
-    b_ref = vec(data["b"])
-    gsh_ref = vec(data["gsh"])
-    bsh_ref = vec(data["bsh"])
+    g = Float64.(vec(data["g"]))
+    b = Float64.(vec(data["b"]))
+    gsh = Float64.(vec(data["gsh"]))
+    bsh = Float64.(vec(data["bsh"]))
     id_slack = Int64(data["id_slack"][1])
-    id_pv = vec(Int64.(data["idgen"]))
-    id = create_indices(id_slack, id_pv, size(vref,1), epsilon)
+    id_pv = Int64.(vec(data["idgen"]))
+    id = create_indices(id_slack, id_pv, size(v,1), epsilon)
     mat = create_incidence_matrices(id)
-    data = SystemData(vref, thref, pref, qref, epsilon, b_ref, g_ref,
-        bsh_ref, gsh_ref)
+    Y = build_admittance_matrix(b, g, bsh, gsh, epsilon)
+    data = SystemData(v, th, p, q, epsilon, b, g,
+        bsh, gsh, Y)
     return data, mat, id
 end
 
@@ -179,15 +178,13 @@ end
 
 
 function compare_params_2_admittance(
-    beta::Vector{Float64},
-    gamma::Vector{Float64},
+    b::Vector{Float64},
+    g::Vector{Float64},
     bsh::Vector{Float64},
     gsh::Vector{Float64},
     epsilon::Matrix{Int64},
     Yref::SparseMatrixCSC{ComplexF64, Int64},
 )
-    g = exp.(gamma)
-    b = -exp.(beta)
     Y = build_admittance_matrix(b, g, bsh, gsh, epsilon)
     # return the Frobenius norm
     return norm(Y - Yref)

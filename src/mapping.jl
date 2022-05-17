@@ -47,15 +47,13 @@ function train_V2S_map!(
     opt,
     param_fun,
     parameters...;
-    tol::Float64 = 0.01,
+    Nepoch::Int64 = 100,
     Ninter::Int64 = 5,
-    Nepoch::Int64 = 10,
 )
-    Nbatch = size(id_batch, 2)    
+    Nbatch = length(id_batch)  
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th[:,id_batch],
         data.v[:,id_batch], mat, id)
     ps = params(parameters)
-    
     logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
         "loss" => Vector{Float64}([]),
         "dy" => Vector{Float64}([]))
@@ -63,8 +61,9 @@ function train_V2S_map!(
         gs = gradient(ps) do
             b, g, bsh, gsh = param_fun(parameters)
             p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            return sum(abs, p - data.p[:,id_batch]) +
-                sum(abs, q - data.q[:, id_batch])
+            return sum(abs2, p - data.p[:,id_batch]) +
+                sum(abs2, q - data.q[:, id_batch]) / Nbatch / 
+                id.Nbus
         end
         
         Flux.update!(opt, ps, gs)
@@ -72,18 +71,17 @@ function train_V2S_map!(
         if(mod(e, Ninter) == 0)
             b, g, bsh, gsh = param_fun(parameters)
             p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            loss = (sum(abs, p - data.p[:,id_batch]) +
-                sum(abs, q - data.q[:,id_batch])) / 2.0 /
+            loss = (sum(abs2, p - data.p[:,id_batch]) +
+                sum(abs2, q - data.q[:,id_batch])) /
                 Nbatch / id.Nbus
-            dy = compare_params_2_admittance(b, g, bsh, gsh,
-                data.b, data.g, data.bsh, data.gsh, mat)
-            #dy = 0
+            dy = compare_params_2_admittance(b, g, bsh, gsh, id.epsilon, data.Y)
             println([e loss dy])
             append!(logs["epochs"], e)
             append!(logs["loss"], loss)
             append!(logs["dy"], dy)
         end
-    end  
+    end
+    println(ps)
     return logs
 end
 
@@ -97,11 +95,11 @@ function train_n_update_V2S_map!(
     param_fun,
     red_param_fun, # see "params.jl" for more info on its role 
     parameters...;
-    tol::Float64 = 0.01,
+    Nepoch::Int64 = 100,
     Ninter::Int64 = 5,
-    Nepoch::Int64 = 10,
+    tol::Float64 = 0.01,
     Nsubepoch::Int64 = 200,
-    b_thres::Float64 = 0.05,
+    thres::Float64 = 0.05,
 )
     param = parameters
     eps = epsilon
@@ -113,8 +111,8 @@ function train_n_update_V2S_map!(
             
         # re-evaluate the structure of the grid (i.e. if the susceptance
         # is smaller than a threshold, one assumes that there is no line)
-        b, _, _, _ = param_fun(param)
-        is_kept = abs.(b) .> b_thres
+        b, g, _, _ = param_fun(param)
+        is_kept = sum(b^2 + g^2) .> thres^2
         
         # if there if any change, apply them
         if(sum(.!is_kept) > 0 & e != Nepoch)
@@ -130,7 +128,7 @@ function train_n_update_V2S_map!(
 end
 
 
-function train_hybrid_V2S_map!(
+function train_nn_hybrid_V2S_map!(
     data::SystemData,
     mat::Matrices,
     id::Indices,
@@ -139,29 +137,37 @@ function train_hybrid_V2S_map!(
     opt,
     param_fun,
     parameters...;
-    Ninter::Int64 = 3,
-    Nepoch::Int64 = 10,
-    reg = 1,
+    Nepoch::Int64 = 100,
+    Ninter::Int64 = 5,
+    lambda::Float64 = 0.1,
 )
-    Nbatch = size(id_batch, 2)
+    Nbatch = length(id_batch)
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th[:,id_batch],
         data.v[:,id_batch], mat, id)
     ps = params(nn, parameters)
     nbias = prod(size(nn[end].bias))
     nw = prod(size(nn[end].weight))
-    logs = zeros(0,5)
+    logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
+        "loss" => Vector{Float64}([]),
+        "dy" => Vector{Float64}([]),
+        "max_nn_contrib" => Vector{Float64}([]),
+        "avg_nn_contrib" => Vector{Float64}([]),)
+    
+    dv = data.v[:,id_batch] .- 1
+    dth = data.th[:,id_batch] .- data.th[id.slack,1]
     
     for e in 1:Nepoch
         gs = gradient(ps) do
             b, g, bsh, gsh = param_fun(parameters)
             p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            x = nn([data.v[:,id_batch]; data.th[:,id_batch]])
-            ds = (sum(abs, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
-                sum(abs, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) /
-                2.0 / Nbatch / id.Nbus
-            dw = (sum(abs, nn[end].weight) / nw +
-                sum(abs, nn[end].bias) / nbias) 
-            return ds  + reg * dw 
+            x = nn([dv; dth])
+            ds = (sum(abs2, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
+                sum(abs2, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) / 
+                Nbatch / id.Nbus
+            #dw = maximum(abs.(x[1:id.Nbus,:].^2 + x[id.Nbus+1:end,:].^2))
+            dw = (sum(abs2, x[1:id.Nbus,:]) + sum(abs2, x[id.Nbus+1:end,:]))  / 
+                Nbatch / id.Nbus
+            return ds  + lambda * dw 
         end
         
         Flux.update!(opt, ps, gs)
@@ -169,14 +175,122 @@ function train_hybrid_V2S_map!(
         if(mod(e, Ninter) == 0)
             b, g, bsh, gsh = param_fun(parameters)
             p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
-            x = nn([data.v[:,id_batch]; data.th[:,id_batch]])
-            loss = (sum(abs, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
-                sum(abs, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) / 2.0 /
+            x = nn([dv; dth])
+            loss = (sum(abs2, p + x[1:id.Nbus,:] - data.p[:,id_batch]) +
+                sum(abs2, q + x[id.Nbus+1:end,:] - data.q[:,id_batch])) /
                 Nbatch / id.Nbus
-            dy = compare_params_2_admittance(b, g, bsh, gsh,
-                data.b, data.g, data.bsh, data.gsh, mat)
+            dy = compare_params_2_admittance(b, g, bsh, gsh, id.epsilon, data.Y)
             println([e loss maximum(abs.(x)) sum(abs.(x)) / prod(size(x)) dy])
-            logs = vcat(logs, [e loss maximum(abs.(x)) sum(abs.(x)) / prod(size(x)) dy])
+            append!(logs["epochs"], e)
+            append!(logs["loss"], loss)
+            append!(logs["dy"], dy)
+            append!(logs["max_nn_contrib"], maximum(abs.(x)))
+            append!(logs["avg_nn_contrib"], sum(abs.(x)) / prod(size(x)))
+        end
+    end  
+    return logs
+end
+
+
+function train_n_update_hybrid_V2S_map!(
+    data::SystemData,
+    epsilon::Matrix{Int64},
+    id::Indices,
+    id_batch::Vector{Int64},
+    p_nn::Vector{Float64},
+    q_nn::Vector{Float64},
+    opt,
+    param_fun,
+    red_param_fun, # see "params.jl" for more info on its role 
+    parameters...;
+    Nepoch::Int64 = 100,
+    Ninter::Int64 = 5,
+    tol::Float64 = 0.01,
+    Nsubepoch::Int64 = 200,
+    lambda::Float64 = 0.1,
+    thres::Float64 = 0.05,
+)
+    p0 = convert_param_tuple_into_vector(parameters)
+    param = convert_param_vector_into_tuple(p0)
+    eps = epsilon
+    id = create_indices(1, collect(1:id.Nbus), id.Nbus, epsilon)
+    mat = create_incidence_matrices(id)
+    for e in 1:Nepoch
+        train_vector_hybrid_V2S_map!(data, mat, id, id_batch, p_nn, q_nn,
+            opt, param_fun, param..., Ninter = Ninter,
+            Nepoch = Nsubepoch, lambda = lambda)
+            
+        # re-evaluate the structure of the grid (i.e. if the susceptance
+        # is smaller than a threshold, one assumes that there is no line)
+        b, g, _, _ = param_fun(param)
+        is_kept = (b.^2 + g.^2) .> thres^2
+        
+        # if there if any change, apply them
+        if(sum(.!is_kept) > 0 & e != Nepoch)
+            red_param_fun(p0, is_kept)
+            param = convert_param_vector_into_tuple(p0)
+            println(param)
+            eps = eps[is_kept,:]
+            id = create_indices(1, collect(1:id.Nbus), id.Nbus, eps)
+            mat = create_incidence_matrices(id)
+        end
+        println([e, sum(is_kept), maximum(b), length(b)])
+    end
+
+    return eps, param...
+end
+
+
+function train_vector_hybrid_V2S_map!(
+    data::SystemData,
+    mat::Matrices,
+    id::Indices,
+    id_batch::Vector{Int64},
+    p_nn::Vector{Float64},
+    q_nn::Vector{Float64},
+    opt,
+    param_fun,
+    parameters...;
+    Nepoch::Int64 = 100,
+    Ninter::Int64 = 5,
+    lambda::Float64 = 0.1,
+)
+    Nbatch = length(id_batch)
+    Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th[:,id_batch],
+        data.v[:,id_batch], mat, id)
+    ps = params(p_nn, q_nn, parameters)
+    logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
+        "loss" => Vector{Float64}([]),
+        "dy" => Vector{Float64}([]),
+        "max_nn_contrib" => Vector{Float64}([]),
+        "avg_nn_contrib" => Vector{Float64}([]),)
+    
+    for e in 1:Nepoch
+        gs = gradient(ps) do
+            b, g, bsh, gsh = param_fun(parameters)
+            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+            ds = (sum(abs2, p .+ p_nn - data.p[:,id_batch]) +
+                sum(abs2, q .+ q_nn - data.q[:,id_batch])) /
+                Nbatch / id.Nbus   
+            dw = (sum(abs2, p_nn) + sum(abs2, q_nn)) / id.Nbus
+            return ds + lambda * dw
+        end
+        
+        Flux.update!(opt, ps, gs)
+        
+        if(mod(e, Ninter) == 0)
+            b, g, bsh, gsh = param_fun(parameters)
+            p, q = V2S_map(b, g, bsh, gsh, V2cos, V2sin, Vii, mat)
+            loss = (sum(abs2, p .+ p_nn - data.p[:,id_batch]) +
+                sum(abs2, q .+ q_nn - data.q[:,id_batch])) /
+                Nbatch / id.Nbus 
+            dy = compare_params_2_admittance(b, g, bsh, gsh, id.epsilon, data.Y)
+            println([e loss maximum(abs, p_nn) sum(abs, p_nn) / prod(size(p_nn)) dy])
+            append!(logs["epochs"], e)
+            append!(logs["loss"], loss)
+            append!(logs["dy"], dy)
+            append!(logs["max_nn_contrib"], maximum(abs, p_nn))
+            append!(logs["avg_nn_contrib"], sum(abs, p_nn) / prod(size(p_nn)))
         end
     end  
     return logs

@@ -74,6 +74,7 @@ struct SystemData
     g::Vector{Float64}
     bsh::Vector{Float64}
     gsh::Vector{Float64}
+    Y::SparseMatrixCSC{ComplexF64, Int64}
 end
 
 include("agnostic.jl")
