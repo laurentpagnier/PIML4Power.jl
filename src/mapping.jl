@@ -81,7 +81,6 @@ function train_V2S_map!(
             append!(logs["dy"], dy)
         end
     end
-    println(ps)
     return logs
 end
 
@@ -112,14 +111,17 @@ function train_n_update_V2S_map!(
         # re-evaluate the structure of the grid (i.e. if the susceptance
         # is smaller than a threshold, one assumes that there is no line)
         b, g, _, _ = param_fun(param)
-        is_kept = sum(b^2 + g^2) .> thres^2
+        is_kept = sqrt.(b.^2 + g.^2) .> thres
         
         # if there if any change, apply them
         if(sum(.!is_kept) > 0 & e != Nepoch)
-            param = red_param_fun(param, is_kept)
+            v = [param[i] for i=1:length(param)]
+            red_param_fun(v, is_kept)
+            param = Tuple(v[i] for i=1:length(v))
             eps = eps[is_kept,:]
             id = create_indices(1, collect(1:id.Nbus), id.Nbus, eps)
             mat = create_incidence_matrices(id)
+            
         end
         println([e, sum(is_kept), maximum(b), length(b)])
     end

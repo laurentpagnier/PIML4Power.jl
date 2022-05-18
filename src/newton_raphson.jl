@@ -20,7 +20,7 @@ function batch_train_with_pmus!(
     ps = params(parameters)
     
     # here we will also treat PV buses as PQ buses
-    id_temp = create_indices(id.slack, [id.slack], id.Nbus, id.epsilon)
+    id_temp = create_indices(id.slack, [id.slack], id.Nbus, id.epsilon)    
     #println(id_temp.pq)
     mat_temp = create_incidence_matrices(id_temp)
     logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
@@ -106,10 +106,10 @@ function batch_train_pq!(
     for e = 1:Nepoch
         
         grads = IdDict()
-        grads[ps[2]] = zeros(size(ps[2]))
-        grads[ps[4]] = zeros(size(ps[4]))
         grads[ps[1]] = zeros(size(ps[1]))
+        grads[ps[2]] = zeros(size(ps[2]))
         grads[ps[3]] = zeros(size(ps[3]))
+        grads[ps[4]] = zeros(size(ps[4]))
         gs = Zygote.Grads(grads, ps)
         Threads.@threads for i in id_batch
             gs .+= gradient(ps) do
@@ -170,6 +170,10 @@ function batch_train_vth!(
     const_jac::Bool = false,
     p_max::Float64 = 8.0,
 )
+    # in this configuration, every bus is assumed to be PQ (expect the slack bus)
+    id_temp = Indices(id.slack, [id.slack], id.ns, id.ns, id.Nbus, id.epsilon)
+    mat_temp = create_incidence_matrices(id_temp)
+    
     Nbatch = length(id_batch)
     ps = params(parameters)
 
@@ -188,12 +192,12 @@ function batch_train_vth!(
             gs .+= gradient(ps) do
                 b, g, bsh, gsh = param_fun(parameters)
                 th, v = newton_raphson_scheme(b, g, bsh, gsh,
-                    data.p[id.ns,i], data.q[id.pq,i], data.v[id.pv,i],
-                    data.th[id.slack,i], mat, id, Niter = Niter,
+                    data.p[id_temp.ns,i], data.q[id_temp.pq,i], data.v[id_temp.pv,i],
+                    data.th[id_temp.slack,i], mat_temp, id_temp, Niter = Niter,
                     const_jac = const_jac)
                     
-                return sum(abs, th[id.ns] - data.th[id.ns,i]) / 0.52 / length(id.ns) +
-                    sum(abs, v[id.pq] - data.v[id.pq,i]) / 0.1 / length(id.pq) 
+                return sum(abs2, th[id_temp.ns] - data.th[id_temp.ns,i]) / 0.52 / length(id_temp.ns) +
+                    sum(abs2, v[id_temp.ns] - data.v[id_temp.ns,i]) / 0.1 / length(id_temp.ns) 
             end
         end
         
@@ -401,7 +405,7 @@ function jacob(
     dtheta = mat.Bmt * th
     dtheta_ns = mat.Bm_nst * th[id.ns]
 
-    costh = cos.(dtheta) # dtheta or dtheta_ns ??????????????????????????????
+    costh = cos.(dtheta)
     sinth = sin.(dtheta)
     
     gs = g .* sinth
