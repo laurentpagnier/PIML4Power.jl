@@ -32,6 +32,8 @@ struct Matrices
     s2full::SparseMatrixCSC{Float64, Int64}
     ns2full::SparseMatrixCSC{Float64, Int64}
     pq2full::SparseMatrixCSC{Float64, Int64}
+    full2pv::SparseMatrixCSC{Float64, Int64}
+    full2pq::SparseMatrixCSC{Float64, Int64}
     Ins::SparseMatrixCSC{Float64, Int64}
     Ipq::SparseMatrixCSC{Float64, Int64}
 end

@@ -97,11 +97,13 @@ function create_incidence_matrices(id::Indices)
     Bout_nst = SparseMatrixCSC{Float64, Int64}(Bout_ns')   
     Bout_pqt = SparseMatrixCSC{Float64, Int64}(Bout_pq')
     pq2nst = SparseMatrixCSC{Float64, Int64}(pq2ns')
+    full2pv = SparseMatrixCSC{Float64, Int64}(pv2full')
+    full2pq = SparseMatrixCSC{Float64, Int64}(pq2full')
     
     mat = Matrices(Bm, Bp, Bin, Bout, Bp_ns, Bp_pq, Bm_ns, Bin_ns,
         Bin_pq, Bout_ns, Bout_pq, Bmt, Bm_nst, Bint, Bin_nst, Bin_pqt,
         Boutt, Bout_nst, Bout_pqt, pq2ns, pq2nst, pv2full, s2full,
-        ns2full, pq2full, Ins, Ipq)
+        ns2full, pq2full, full2pv, full2pq, Ins, Ipq)
     return mat
 end
 
