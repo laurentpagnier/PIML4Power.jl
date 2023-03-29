@@ -53,7 +53,7 @@ function train_V2S_map!(
     Nbatch = length(id_batch)  
     Vij, V2cos, V2sin, Vii = preproc_V2S_map(data.th[:,id_batch],
         data.v[:,id_batch], mat, id)
-    ps = params(parameters)
+    ps = Flux.params(parameters)
     logs = Dict{String,Any}("epochs" => Vector{Float64}([]),
         "loss" => Vector{Float64}([]),
         "dy" => Vector{Float64}([]))
